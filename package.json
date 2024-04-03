@@ -1,0 +1,44 @@
+{
+    "name": "request-pack",
+    "version": "0.3.0",
+    "description": "",
+    "source": "./src/index.ts",
+    "types": "./dist/index.d.ts",
+    "main": "./dist/index.js",
+    "module": "./dist/index.module.js",
+    "unpkg": "./dist/index.umd.js",
+    "exports": {
+        "require": "./dist/index.js",
+        "default": "./dist/index.modern.js"
+    },
+    "files": [
+        "dist/",
+        "README.md"
+    ],
+    "scripts": {
+        "dev": "ts-node-dev --respawn --transpile-only ./src/index.ts",
+        "watch": "microbundle watch",
+        "build": "rimraf ./dist && microbundle --tsconfig ./tsconfig.json"
+    },
+    "keywords": [
+        "request pack",
+        "utils",
+        "format"
+    ],
+    "author": "nexttopsu@gmail.com",
+    "license": "ISC",
+    "engines": {
+        "node": ">=16"
+    },
+    "devDependencies": {
+        "microbundle": "^0.15.1",
+        "rimraf": "^5.0.5",
+        "ts-node-dev": "^2.0.0",
+        "typescript": "^5.4.3"
+    },
+    "dependencies": {
+        "axios-https-proxy-fix": "^0.17.1",
+        "cheerio": "^1.0.0-rc.12",
+        "iconv-lite": "^0.6.3"
+    }
+}
