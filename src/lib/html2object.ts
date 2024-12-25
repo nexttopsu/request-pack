@@ -1,18 +1,17 @@
 import { load } from 'cheerio';
 
-export interface Parser {
+export interface Html2ObjectParser {
     target: string;
     type: string;
     attr?: string;
-    list?: Parser[];
+    list?: Html2ObjectParser[];
 }
 
 export interface HtmlObjectParsers {
     [key: string]: any;
 }
 
-
-function strIntoObjects(parser: string): Parser | null {
+function strIntoObjects(parser: string): Html2ObjectParser | null {
     const match = parser.match(/\/\w+\(/)
     if (!match) {
         throw new Error('parser error')
@@ -29,7 +28,7 @@ function strIntoObjects(parser: string): Parser | null {
         '/text(': () => ({ target, type: 'text' }),
         '/html(': () => ({ target, type: 'html' }),
         '/attr(': () => ({ target, type: 'attr', attr: fn2 }),
-        '/each(': () => ({ target, type: 'each', list: fn2.split(',').map(item => strIntoObjects((item).trim())) }),
+        '/loop(': () => ({ target, type: 'loop', list: fn2.split(',').map(item => strIntoObjects((item).trim())) }),
     }
 
     return methods[type] ? methods[type]() : null;
@@ -50,9 +49,9 @@ function strAllIntoObjects(parser: HtmlObjectParsers): HtmlObjectParsers {
     return result;
 }
 
-function formatText(parent:any, parser: Parser): string {
+function formatText(parent:any, parser: Html2ObjectParser): string {
     const target = parser.target
-    const self = ['self', '$', 'this'].includes(target) ? parent : parent.find(target);
+    const self = !target ? parent : parent.find(target);
 
     switch (parser.type) {
         case 'text':
@@ -83,7 +82,7 @@ export function html2object(html: string, parser: HtmlObjectParsers, removeSelec
     Object.keys(parser_match).forEach(key => {
         const item = parser_match[key];
         if (item) {
-            if (item.type == 'each') {
+            if (item.type == 'loop') {
                 const list: any[] = [];
                 $(item.target).each((_, item2) => {
                     list.push(item.list?.map((self: any) => formatText($(item2), self)));

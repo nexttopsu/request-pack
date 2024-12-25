@@ -1,6 +1,6 @@
 {
     "name": "request-pack",
-    "version": "0.3.1",
+    "version": "0.4.0",
     "description": "",
     "source": "./src/index.ts",
     "types": "./dist/index.d.ts",
@@ -17,6 +17,7 @@
     ],
     "scripts": {
         "dev": "ts-node-dev --respawn --transpile-only ./src/index.ts",
+        "test": "ts-node-dev --respawn --transpile-only ./test/test.ts",
         "watch": "microbundle watch",
         "build": "rimraf ./dist && microbundle --tsconfig ./tsconfig.json"
     },

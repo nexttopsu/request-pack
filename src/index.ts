@@ -1,9 +1,9 @@
-import { html2object } from './lib/html2object'
-import Task from './lib/task'
-import Worker from './lib/worker'
+export * from './lib/Worker';
+export * from './lib/request';
+export * from './lib/html2object';
+
+import * as utils from './lib/utils';
 
 export {
-    html2object,
-    Task,
-    Worker
+    utils
 }
