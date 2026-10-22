@@ -22,6 +22,7 @@
         "dist/",
         "README.md",
         "CHANGELOG.md",
+        "playground.html",
         "LICENSE"
     ],
     "scripts": {

@@ -1,0 +1,1794 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Schema 编辑器 · request-pack</title>
+<style>
+:root {
+    --desk-1: #dfe4f0;
+    --desk-2: #f0f1f6;
+    --window: #ffffff;
+    --pane-alt: #fafafc;
+    --titlebar-top: #fbfbfd;
+    --titlebar-bottom: #f2f2f5;
+    --text: #1d1d1f;
+    --text-2: #4b4b52;
+    --muted: #8a8a8f;
+    --line: rgba(0, 0, 0, .07);
+    --line-2: rgba(0, 0, 0, .13);
+    --hover: rgba(0, 0, 0, .045);
+    --sel: rgba(10, 132, 255, .10);
+    --seg-bg: rgba(0, 0, 0, .055);
+    --blue: #0a84ff;
+    --blue-ring: rgba(10, 132, 255, .22);
+    --input: #ffffff;
+    --code-bg: #fbfbfd;
+    --tok-key: #0a6ed1;
+    --tok-str: #c41a16;
+    --tok-num: #1c00cf;
+    --tok-bool: #9b2393;
+    --tok-fn: #6f42c1;
+    --danger: #ff3b30;
+    --danger-soft: rgba(255, 59, 48, .08);
+    --green: #28cd41;
+    --toast-bg: rgba(32, 32, 38, .92);
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --desk-1: #0e0e12;
+        --desk-2: #1b1b21;
+        --window: #1e1e23;
+        --pane-alt: #191a1e;
+        --titlebar-top: #26262c;
+        --titlebar-bottom: #202026;
+        --text: #f2f2f7;
+        --text-2: #c7c7cc;
+        --muted: #8e8e93;
+        --line: rgba(255, 255, 255, .08);
+        --line-2: rgba(255, 255, 255, .15);
+        --hover: rgba(255, 255, 255, .055);
+        --sel: rgba(10, 132, 255, .20);
+        --seg-bg: rgba(255, 255, 255, .07);
+        --input: #2c2c32;
+        --code-bg: #161619;
+        --tok-key: #79b8ff;
+        --tok-str: #ff8170;
+        --tok-num: #d9c97c;
+        --tok-bool: #d2a8ff;
+        --tok-fn: #b392f0;
+        --danger: #ff6961;
+        --danger-soft: rgba(255, 105, 97, .12);
+        --toast-bg: rgba(60, 60, 67, .92);
+    }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+    height: 100%;
+    margin: 0;
+}
+
+body {
+    font: 13px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: var(--text);
+    background: var(--desk-1);
+    -webkit-font-smoothing: antialiased;
+    overflow: auto;
+}
+
+body::before {
+    content: "";
+    position: fixed;
+    inset: -25%;
+    z-index: 0;
+    background:
+        radial-gradient(42% 40% at 20% 16%, rgba(120, 170, 255, .55), transparent 68%),
+        radial-gradient(38% 38% at 82% 10%, rgba(196, 156, 255, .42), transparent 70%),
+        radial-gradient(46% 44% at 74% 84%, rgba(126, 226, 208, .40), transparent 70%),
+        radial-gradient(38% 38% at 14% 86%, rgba(255, 194, 158, .40), transparent 70%),
+        linear-gradient(160deg, var(--desk-2), var(--desk-1));
+    filter: blur(36px);
+}
+
+/* ---------- 窗口 ---------- */
+
+.window {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 56px);
+    min-height: 560px;
+    min-width: 900px;
+    margin: 28px;
+    background: var(--window);
+    border-radius: 11px;
+    overflow: hidden;
+    box-shadow:
+        0 0 0 .5px rgba(0, 0, 0, .18),
+        0 30px 80px rgba(0, 0, 0, .26),
+        0 10px 24px rgba(0, 0, 0, .10);
+}
+
+.titlebar {
+    flex: none;
+    position: relative;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 15px;
+    background: linear-gradient(var(--titlebar-top), var(--titlebar-bottom));
+    border-bottom: .5px solid var(--line-2);
+    user-select: none;
+}
+
+.lights { display: flex; gap: 8px; }
+
+.lights i {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    display: block;
+    box-shadow: inset 0 0 0 .5px rgba(0, 0, 0, .14);
+}
+
+.lights .r { background: #ff5f57; }
+.lights .y { background: #febc2e; }
+.lights .g { background: #28c840; }
+
+.title {
+    position: absolute;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 590;
+    letter-spacing: .01em;
+    color: var(--text);
+    pointer-events: none;
+}
+
+.tb-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    z-index: 1;
+}
+
+.pill {
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: .02em;
+    color: var(--muted);
+    padding: 2px 8px;
+    border-radius: 20px;
+    background: var(--seg-bg);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* ---------- 三栏 ---------- */
+
+.body {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+}
+
+.pane {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+}
+
+.pane + .pane { border-left: .5px solid var(--line-2); }
+
+.pane-html { width: 33%; background: var(--pane-alt); }
+.pane-schema { width: 31%; }
+.pane-result { flex: 1; min-width: 240px; background: var(--pane-alt); }
+
+.pane-head {
+    flex: none;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+    border-bottom: .5px solid var(--line);
+    background: var(--window);
+}
+
+.pane-result .pane-head,
+.pane-html .pane-head { background: transparent; }
+
+.pane-title {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .04em;
+    color: var(--muted);
+    text-transform: uppercase;
+}
+
+.spacer { flex: 1; }
+
+.pane-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.scroll { overflow: auto; }
+
+.pane-foot {
+    flex: none;
+    min-height: 28px;
+    display: flex;
+    align-items: center;
+    padding: 5px 12px;
+    border-top: .5px solid var(--line);
+    font-size: 10.5px;
+    color: var(--muted);
+    background: var(--pane-alt);
+    line-height: 1.4;
+}
+
+/* ---------- 控件 ---------- */
+
+.seg {
+    display: inline-flex;
+    padding: 2px;
+    border-radius: 6px;
+    background: var(--seg-bg);
+}
+
+.seg button {
+    border: 0;
+    background: transparent;
+    font: inherit;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-2);
+    padding: 2px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background .14s ease, color .14s ease;
+}
+
+.seg button:hover { color: var(--text); }
+
+.seg button.on {
+    background: var(--input);
+    color: var(--text);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .13), 0 0 0 .5px rgba(0, 0, 0, .07);
+}
+
+@media (prefers-color-scheme: dark) {
+    .seg button.on { box-shadow: 0 1px 2px rgba(0, 0, 0, .45), 0 0 0 .5px rgba(255, 255, 255, .09); }
+}
+
+.text-btn {
+    height: 23px;
+    padding: 0 9px;
+    font: inherit;
+    font-size: 11.5px;
+    color: var(--text-2);
+    background: var(--input);
+    border: .5px solid var(--line-2);
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background .14s ease;
+}
+
+.text-btn:hover { background: var(--hover); }
+.text-btn:active { transform: translateY(.5px); }
+
+.icon-btn {
+    width: 23px;
+    height: 23px;
+    display: grid;
+    place-items: center;
+    font-size: 15px;
+    line-height: 1;
+    color: var(--text-2);
+    background: var(--input);
+    border: .5px solid var(--line-2);
+    border-radius: 5px;
+    cursor: pointer;
+    padding: 0 0 1px;
+}
+
+.icon-btn:hover { background: var(--hover); color: var(--text); }
+
+.inp {
+    width: 100%;
+    min-width: 0;
+    height: 24px;
+    padding: 0 6px;
+    font: inherit;
+    font-size: 12px;
+    color: var(--text);
+    background: var(--input);
+    border: .5px solid var(--line-2);
+    border-radius: 5px;
+    outline: none;
+    transition: border-color .13s ease, box-shadow .13s ease;
+}
+
+.inp::placeholder { color: var(--muted); opacity: .85; }
+
+.inp:focus {
+    border-color: var(--blue);
+    box-shadow: 0 0 0 3px var(--blue-ring);
+}
+
+.inp.mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px;
+}
+
+.sel { position: relative; min-width: 0; }
+
+.sel select {
+    width: 100%;
+    appearance: none;
+    -webkit-appearance: none;
+    padding-right: 16px;
+    cursor: pointer;
+}
+
+.sel::after {
+    content: "";
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    margin-top: -2px;
+    border: 4px solid transparent;
+    border-top-color: var(--muted);
+    pointer-events: none;
+}
+
+/* ---------- 左栏 ---------- */
+
+.frame-wrap {
+    flex: 1;
+    min-height: 0;
+    padding: 10px;
+}
+
+iframe {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    display: block;
+    background: #fff;
+    border-radius: 7px;
+    box-shadow: 0 0 0 .5px var(--line-2);
+}
+
+.source-wrap {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+}
+
+.source-wrap textarea {
+    flex: 1;
+    width: 100%;
+    resize: none;
+    border: 0;
+    outline: none;
+    padding: 12px;
+    background: transparent;
+    color: var(--text);
+    font: 11.5px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace;
+    tab-size: 4;
+}
+
+/* ---------- Schema 编辑器 ---------- */
+
+#fields {
+    padding: 8px 8px 24px;
+}
+
+#fields > * { flex: none; }
+
+.field {
+    position: relative;
+    border-radius: 7px;
+}
+
+.field-row {
+    display: grid;
+    grid-template-columns: 86px 72px minmax(0, 1fr) 20px;
+    gap: 5px;
+    align-items: center;
+    padding: 3px 4px;
+    border-radius: 6px;
+    cursor: default;
+}
+
+.field-row:hover { background: var(--hover); }
+
+.field.active > .field-row {
+    background: var(--sel);
+    box-shadow: inset 0 0 0 1px rgba(10, 132, 255, .40);
+}
+
+.field.err > .field-row::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 5px;
+    bottom: 5px;
+    width: 2.5px;
+    border-radius: 2px;
+    background: var(--danger);
+}
+
+.row-del {
+    width: 18px;
+    height: 18px;
+    display: grid;
+    place-items: center;
+    padding: 0 0 1px;
+    font-size: 13px;
+    line-height: 1;
+    color: var(--muted);
+    background: transparent;
+    border: 0;
+    border-radius: 50%;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity .12s ease, background .12s ease, color .12s ease;
+}
+
+.field-row:hover .row-del,
+.field.active > .field-row .row-del { opacity: 1; }
+
+.row-del:hover { background: var(--danger-soft); color: var(--danger); }
+
+.key-ph {
+    display: flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 6px;
+    font-size: 11px;
+    color: var(--muted);
+    border: .5px dashed var(--line-2);
+    border-radius: 5px;
+    justify-content: center;
+}
+
+.field-detail {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 1px 4px 5px 4px;
+    font-size: 10.5px;
+    color: var(--muted);
+}
+
+.field-detail .inp {
+    height: 20px;
+    font-size: 11px;
+    width: auto;
+    flex: 0 0 auto;
+}
+
+.detail-label { white-space: nowrap; }
+
+.chk {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.chk input {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 12px;
+    height: 12px;
+    margin: 0;
+    border: .5px solid var(--line-2);
+    border-radius: 3px;
+    background: var(--input);
+    position: relative;
+    cursor: pointer;
+}
+
+.chk input:checked {
+    background: var(--blue);
+    border-color: var(--blue);
+}
+
+.chk input:checked::after {
+    content: "";
+    position: absolute;
+    left: 3px;
+    top: .5px;
+    width: 4px;
+    height: 7px;
+    border: solid #fff;
+    border-width: 0 1.4px 1.4px 0;
+    transform: rotate(42deg);
+}
+
+.path-hint {
+    margin-left: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10px;
+    color: var(--muted);
+    opacity: .78;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 52%;
+}
+
+.children {
+    margin: 0 0 4px 12px;
+    padding-left: 10px;
+    border-left: 1px dashed var(--line-2);
+}
+
+.child-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 4px 3px;
+    font-size: 10px;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+
+.add-child {
+    display: block;
+    width: calc(100% - 8px);
+    margin: 1px 4px 5px;
+    padding: 3px 0;
+    font: inherit;
+    font-size: 11px;
+    color: var(--muted);
+    background: transparent;
+    border: .5px dashed var(--line-2);
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.add-child:hover {
+    color: var(--blue);
+    border-color: var(--blue);
+    background: var(--sel);
+}
+
+#add-field {
+    width: calc(100% - 16px);
+    margin: 4px 8px 0;
+    padding: 6px 0;
+    font: inherit;
+    font-size: 11.5px;
+    color: var(--muted);
+    background: transparent;
+    border: .5px dashed var(--line-2);
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+#add-field:hover {
+    color: var(--blue);
+    border-color: var(--blue);
+    background: var(--sel);
+}
+
+/* ---------- 输出 ---------- */
+
+.out {
+    display: block;
+    padding: 10px 12px 20px;
+    font: 11.5px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.code {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text);
+    font: inherit;
+}
+
+.tok-key { color: var(--tok-key); }
+.tok-str { color: var(--tok-str); }
+.tok-num { color: var(--tok-num); }
+.tok-bool { color: var(--tok-bool); }
+.tok-null { color: var(--muted); }
+.tok-fn { color: var(--tok-fn); }
+
+.err-list {
+    margin: 0 0 10px;
+    padding: 7px 9px;
+    border-radius: 6px;
+    background: var(--danger-soft);
+    border: .5px solid rgba(255, 59, 48, .28);
+    font-family: -apple-system, "PingFang SC", sans-serif;
+    font-size: 11px;
+    line-height: 1.55;
+    color: var(--danger);
+}
+
+.err-list b {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 3px;
+}
+
+.err-list div + div { margin-top: 2px; }
+
+.err-list code {
+    font-family: ui-monospace, Menlo, monospace;
+    opacity: .85;
+}
+
+.toast {
+    position: fixed;
+    left: 50%;
+    bottom: 44px;
+    z-index: 60;
+    transform: translate(-50%, 14px);
+    padding: 8px 15px;
+    border-radius: 9px;
+    background: var(--toast-bg);
+    color: #fff;
+    font-size: 12px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .22s ease, transform .22s ease;
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    box-shadow: 0 8px 26px rgba(0, 0, 0, .28);
+}
+
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+.hidden { display: none !important; }
+
+.flash { animation: flash .45s ease; }
+
+@keyframes flash {
+    0% { box-shadow: 0 0 0 0 rgba(40, 205, 65, .55); border-color: var(--green); }
+    100% { box-shadow: 0 0 0 6px rgba(40, 205, 65, 0); border-color: var(--line-2); }
+}
+
+::-webkit-scrollbar { width: 9px; height: 9px; }
+
+::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, .17);
+    border-radius: 6px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, .3);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+}
+
+::-webkit-scrollbar-track { background: transparent; }
+
+@media (prefers-color-scheme: dark) {
+    ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .18); background-clip: padding-box; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, .32); background-clip: padding-box; }
+}
+</style>
+</head>
+<body>
+<div class="window">
+    <header class="titlebar">
+        <div class="lights"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+        <div class="title">Schema 编辑器</div>
+        <div class="tb-right"><span class="pill">html2object</span></div>
+    </header>
+
+    <div class="body">
+        <section class="pane pane-html">
+            <div class="pane-head">
+                <span class="pane-title">页面</span>
+                <div class="seg" id="html-tabs">
+                    <button data-tab="preview" class="on">预览</button>
+                    <button data-tab="source">HTML</button>
+                </div>
+            </div>
+            <div class="pane-body">
+                <div class="frame-wrap" id="frame-wrap">
+                    <iframe id="frame" sandbox="allow-same-origin" title="页面预览"></iframe>
+                </div>
+                <div class="source-wrap hidden" id="source-wrap">
+                    <textarea id="source" spellcheck="false" autocomplete="off"></textarea>
+                </div>
+            </div>
+            <div class="pane-foot" id="pick-hint">点击预览中的元素，回填到当前字段</div>
+        </section>
+
+        <section class="pane pane-schema">
+            <div class="pane-head">
+                <span class="pane-title">字段</span>
+                <div class="spacer"></div>
+                <button class="text-btn" id="reset">重置</button>
+            </div>
+            <div class="pane-body scroll" id="fields"></div>
+        </section>
+
+        <section class="pane pane-result">
+            <div class="pane-head">
+                <span class="pane-title">输出</span>
+                <div class="seg" id="out-tabs">
+                    <button data-tab="json" class="on">结果</button>
+                    <button data-tab="code">代码</button>
+                </div>
+                <div class="spacer"></div>
+                <button class="text-btn" id="copy">复制</button>
+            </div>
+            <div class="pane-body scroll out" id="out"></div>
+            <div class="pane-foot" id="out-foot"></div>
+        </section>
+    </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+'use strict';
+
+/* ================================================================== */
+/* 示例页面                                                            */
+/* ================================================================== */
+
+const SAMPLE_HTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>MacBook Pro 14 英寸 - Apple (中国大陆)</title>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Product","name":"MacBook Pro 14 英寸","brand":{"@type":"Brand","name":"Apple"},"offers":{"@type":"Offer","price":"12999","priceCurrency":"CNY","availability":"InStock"},"aggregateRating":{"@type":"AggregateRating","ratingValue":"4.8","reviewCount":"1263"}}<\/script>
+<style>body{margin:0;padding:24px;font:14px/1.7 -apple-system,"PingFang SC",sans-serif;color:#1d1d1f}h1{font-size:25px;margin:0 0 6px}.sub{color:#666;margin:0 0 16px}.price-box{display:flex;align-items:baseline;gap:10px;margin:0 0 6px}.price{font-size:22px;font-weight:600}.note{color:#666;font-size:12px}.buy{display:inline-block;margin:8px 0 20px;padding:7px 18px;background:#0071e3;color:#fff;border-radius:8px;text-decoration:none;font-size:13px}ul{padding-left:0;list-style:none;margin:0 0 20px}li{display:flex;gap:12px;padding:8px 0;border-bottom:1px solid #eee;font-size:13px}.label{width:64px;color:#666}.tabs{display:flex;gap:16px;border-top:1px solid #eee;padding-top:14px}.tab{color:#0071e3;text-decoration:none;font-size:13px}.tab.active{font-weight:600;border-bottom:2px solid #0071e3;padding-bottom:2px}</style>
+</head>
+<body>
+<header class="nav"><a class="logo" href="/">Apple</a></header>
+<main class="product">
+<h1 class="title">MacBook Pro 14 英寸</h1>
+<p class="sub">搭载 M4 芯片，快得离谱。</p>
+<div class="price-box"><span class="price">¥12,999</span><span class="note">或 24 期免息 ¥541.62/月</span></div>
+<a class="buy" href="/shop/buy-mac/macbook-pro" data-track="hero-buy">购买</a>
+<ul class="spec-list">
+<li class="spec"><span class="label">芯片</span><span class="value">Apple M4</span></li>
+<li class="spec"><span class="label">内存</span><span class="value">16GB 统一内存</span></li>
+<li class="spec"><span class="label">存储</span><span class="value">512GB SSD</span></li>
+<li class="spec"><span class="label">屏幕</span><span class="value">14.2 英寸 Liquid 视网膜 XDR</span></li>
+</ul>
+<nav class="tabs"><a class="tab active" href="/macbook-pro">概览</a><a class="tab" href="/macbook-pro/specs">技术规格</a><a class="tab" href="/macbook-pro/compare">对比</a></nav>
+</main>
+</body>
+</html>`;
+
+const KIND_LABEL = {
+    text: '文本',
+    html: 'HTML',
+    attr: '属性',
+    json: 'JSON',
+    loop: '列表',
+    object: '对象',
+};
+
+const KIND_COLOR = {
+    text: '#0a84ff',
+    html: '#5e5ce6',
+    attr: '#ff9f0a',
+    json: '#30d158',
+    loop: '#bf5af2',
+    object: '#64d2ff',
+};
+
+/* ================================================================== */
+/* 状态                                                                */
+/* ================================================================== */
+
+let uid = 1;
+const nid = () => uid++;
+
+function newField(patch) {
+    return Object.assign({
+        id: nid(),
+        key: '',
+        kind: 'text',
+        selector: '',
+        attr: 'href',
+        index: '',
+        nullable: false,
+        scalar: false,
+        children: [],
+        __parent: null,
+    }, patch || {});
+}
+
+let seq = 0;
+function nextKey() {
+    seq += 1;
+    return 'field' + seq;
+}
+
+function defaultRules() {
+    return [
+        newField({ key: 'title', kind: 'text', selector: 'h1.title' }),
+        newField({ key: 'subtitle', kind: 'text', selector: '.sub' }),
+        newField({
+            key: 'priceBox', kind: 'object', selector: '.price-box', children: [
+                newField({ key: 'amount', kind: 'text', selector: '.price' }),
+                newField({ key: 'note', kind: 'text', selector: '.note' }),
+            ],
+        }),
+        newField({ key: 'buyUrl', kind: 'attr', selector: '.buy', attr: 'href' }),
+        newField({ key: 'track', kind: 'attr', selector: '.buy', attr: 'data-track' }),
+        newField({
+            key: 'specs', kind: 'loop', selector: '.spec-list .spec', children: [
+                newField({ key: 'label', kind: 'text', selector: '.label' }),
+                newField({ key: 'value', kind: 'text', selector: '.value' }),
+            ],
+        }),
+        newField({
+            key: 'tabs', kind: 'loop', selector: '.tabs .tab', children: [
+                newField({ key: 'name', kind: 'text', selector: '' }),
+                newField({ key: 'href', kind: 'attr', selector: '', attr: 'href' }),
+            ],
+        }),
+        newField({ key: 'jsonLd', kind: 'json', selector: 'script[type="application/ld+json"]' }),
+        newField({ key: 'rating', kind: 'text', selector: '.rating', nullable: true }),
+    ];
+}
+
+const state = {
+    html: SAMPLE_HTML,
+    rules: [],
+    activeId: null,
+    tab: 'json',
+    result: null,
+    errors: [],
+    ms: 0,
+};
+
+/* ================================================================== */
+/* 小工具                                                              */
+/* ================================================================== */
+
+const $ = id => document.getElementById(id);
+
+function esc(s) {
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+function quote(s) {
+    return "'" + String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'";
+}
+
+const isSimpleClass = c => /^[A-Za-z_][\w-]*$/.test(c);
+const cssEsc = s => (window.CSS && CSS.escape ? CSS.escape(s) : s);
+
+function toast(msg) {
+    const el = $('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => el.classList.remove('show'), 1600);
+}
+
+function flash(el) {
+    if (!el) return;
+    el.classList.remove('flash');
+    void el.offsetWidth;
+    el.classList.add('flash');
+    setTimeout(() => el.classList.remove('flash'), 500);
+}
+
+/* ================================================================== */
+/* 解析引擎 —— 与 src/lib/parser.ts 的 extract / applySchema 语义一致   */
+/* ================================================================== */
+
+const textOf = n => (n && n.textContent) || '';
+const htmlOf = n => (!n ? '' : n.nodeType === 9 ? n.documentElement.innerHTML : n.innerHTML);
+
+function pick(nodes, selector) {
+    if (!selector) return nodes;
+    const out = [];
+    for (const n of nodes) {
+        if (n && typeof n.querySelectorAll === 'function') {
+            out.push(...n.querySelectorAll(selector));
+        }
+    }
+    return out;
+}
+
+function applyIndex(list, index) {
+    if (typeof index !== 'number' || !Number.isFinite(index)) return list;
+    return index >= 0 && index < list.length ? [list[index]] : [];
+}
+
+function runField(nodes, field, path, errors) {
+    switch (field.type) {
+        case 'text': {
+            const cut = applyIndex(pick(nodes, field.selector), field.index);
+            if (field.nullable && field.selector && cut.length === 0) return null;
+            return cut.map(textOf).join('').trim();
+        }
+        case 'html': {
+            const cut = applyIndex(pick(nodes, field.selector), field.index);
+            if (field.nullable && field.selector && cut.length === 0) return null;
+            return cut.map(htmlOf).join('').trim();
+        }
+        case 'attr': {
+            const cut = applyIndex(pick(nodes, field.selector), field.index);
+            const host = cut[0];
+            const value = host && typeof host.getAttribute === 'function'
+                ? host.getAttribute(field.name)
+                : null;
+            if (value === null || value === undefined) return field.nullable ? null : '';
+            return String(value).trim();
+        }
+        case 'json': {
+            const raw = pick(nodes, field.selector).map(textOf).join('').trim();
+            if (!raw) return null;
+            try {
+                return JSON.parse(raw);
+            } catch (err) {
+                throw new Error('内容不是合法 JSON：' + err.message);
+            }
+        }
+        case 'object': {
+            const scope = field.selector ? pick(nodes, field.selector) : nodes;
+            return runSchema(scope, field.schema, path, errors);
+        }
+        case 'loop': {
+            const items = pick(nodes, field.selector);
+            const itemRule = field.schema;
+            const scalar = itemRule && typeof itemRule.type === 'string';
+            return items.map((el, i) => {
+                const one = [el];
+                return scalar
+                    ? runField(one, itemRule, path + '[' + i + ']', errors)
+                    : runSchema(one, itemRule, path + '[' + i + ']', errors);
+            });
+        }
+        default:
+            throw new Error('未知字段类型：' + field.type);
+    }
+}
+
+function runSchema(nodes, schema, path, errors) {
+    const out = {};
+    for (const key of Object.keys(schema)) {
+        if (key === '__id') continue;
+        const field = schema[key];
+        const p = path ? path + '.' + key : key;
+        try {
+            out[key] = runField(nodes, field, p, errors);
+        } catch (err) {
+            errors.push({ id: field && field.__id, path: p, message: err.message });
+            out[key] = null;
+        }
+    }
+    return out;
+}
+
+/* ================================================================== */
+/* 编辑器状态 -> 库的 Field 描述                                        */
+/* ================================================================== */
+
+function indexOfField(f) {
+    const raw = String(f.index == null ? '' : f.index).trim();
+    if (!raw) return undefined;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : undefined;
+}
+
+function toField(f) {
+    const idx = indexOfField(f);
+    const base = { __id: f.id };
+
+    switch (f.kind) {
+        case 'text':
+        case 'html': {
+            const out = Object.assign(base, { type: f.kind, selector: f.selector });
+            if (idx !== undefined) out.index = idx;
+            if (f.nullable) out.nullable = true;
+            return out;
+        }
+        case 'attr': {
+            const out = Object.assign(base, { type: 'attr', name: f.attr || '' });
+            if (f.selector) out.selector = f.selector;
+            if (idx !== undefined) out.index = idx;
+            if (f.nullable) out.nullable = true;
+            return out;
+        }
+        case 'json':
+            return Object.assign(base, { type: 'json', selector: f.selector });
+        case 'object': {
+            const out = Object.assign(base, { type: 'object', schema: toSchema(f.children, null, '') });
+            if (f.selector) out.selector = f.selector;
+            return out;
+        }
+        case 'loop': {
+            let item;
+            if (f.scalar) {
+                item = f.children[0] ? toField(f.children[0]) : { type: 'text', selector: '' };
+            } else {
+                item = toSchema(f.children, null, '');
+            }
+            return Object.assign(base, { type: 'loop', selector: f.selector, schema: item });
+        }
+        default:
+            return Object.assign(base, { type: 'text', selector: '' });
+    }
+}
+
+function toSchema(fields, errors, path) {
+    const out = {};
+    for (const f of fields) {
+        const key = String(f.key || '').trim();
+        if (!key) {
+            if (errors) errors.push({ id: f.id, path: path || '(根)', message: '字段名为空，已跳过' });
+            continue;
+        }
+        if (Object.prototype.hasOwnProperty.call(out, key) && errors) {
+            errors.push({ id: f.id, path: path || '(根)', message: '字段名 "' + key + '" 重复' });
+        }
+        out[key] = toField(f);
+    }
+    return out;
+}
+
+/* ================================================================== */
+/* 代码生成                                                            */
+/* ================================================================== */
+
+const FN_ORDER = ['attr', 'html', 'json', 'loop', 'nullable', 'object', 'text'];
+let usedFns = new Set();
+
+const mark = name => usedFns.add(name);
+
+function ident(key) {
+    const k = String(key || '');
+    return /^[A-Za-z_$][\w$]*$/.test(k) ? k : quote(k);
+}
+
+function optsCode(f) {
+    const idx = indexOfField(f);
+    return idx === undefined ? '' : '{ index: ' + idx + ' }';
+}
+
+function codeExpr(f, depth) {
+    const s = quote(f.selector || '');
+    const o = optsCode(f);
+    let expr;
+
+    switch (f.kind) {
+        case 'text':
+        case 'html':
+            mark(f.kind);
+            expr = o ? f.kind + '(' + s + ', ' + o + ')' : f.kind + '(' + s + ')';
+            break;
+        case 'attr': {
+            mark('attr');
+            const args = [quote(f.attr || 'name')];
+            if (f.selector) args.push(quote(f.selector));
+            else if (o) args.push('undefined');
+            if (o) args.push(o);
+            expr = 'attr(' + args.join(', ') + ')';
+            break;
+        }
+        case 'json':
+            mark('json');
+            expr = 'json(' + s + ')';
+            break;
+        case 'object': {
+            mark('object');
+            const inner = codeSchema(f.children, depth + 1);
+            expr = f.selector ? 'object(' + s + ', ' + inner + ')' : 'object(' + inner + ')';
+            break;
+        }
+        case 'loop': {
+            mark('loop');
+            const item = f.scalar
+                ? codeExpr(f.children[0] || { kind: 'text', selector: '', index: '', nullable: false }, depth + 1)
+                : codeSchema(f.children, depth + 1);
+            expr = 'loop(' + s + ', ' + item + ')';
+            break;
+        }
+        default:
+            expr = 'null';
+    }
+
+    if (f.nullable && f.kind !== 'json') {
+        mark('nullable');
+        expr = 'nullable(' + expr + ')';
+    }
+    return expr;
+}
+
+function codeSchema(fields, depth) {
+    const valid = fields.filter(f => String(f.key || '').trim());
+    if (!valid.length) return '{}';
+    const pad = '    '.repeat(depth);
+    const lines = valid.map(f => pad + ident(f.key) + ': ' + codeExpr(f, depth) + ',');
+    return '{\n' + lines.join('\n') + '\n' + '    '.repeat(depth - 1) + '}';
+}
+
+function buildCode() {
+    usedFns = new Set();
+    const body = codeSchema(state.rules, 1);
+    const imports = FN_ORDER.filter(n => usedFns.has(n));
+    const head = imports.length
+        ? 'import { ' + imports.join(', ') + " } from 'request-pack';\n\n"
+        : '';
+    return head + 'const schema = ' + body + ';\n\nconst data = html2object(page, schema);';
+}
+
+/* ================================================================== */
+/* 高亮                                                                */
+/* ================================================================== */
+
+function highlightJSON(value) {
+    const json = value === undefined ? 'null' : JSON.stringify(value, null, 2);
+    const re = /("(?:\\u[\da-fA-F]{4}|\\[^u]|[^\\"])*"[ \t]*:?)|\b(true|false)\b|\bnull\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g;
+    let out = '';
+    let last = 0;
+    let m;
+    while ((m = re.exec(json))) {
+        out += esc(json.slice(last, m.index));
+        if (m[1]) {
+            const isKey = /[ \t]*:$/.test(m[1]);
+            out += '<span class="' + (isKey ? 'tok-key' : 'tok-str') + '">' + esc(m[1]) + '</span>';
+        } else if (m[2]) {
+            out += '<span class="tok-bool">' + esc(m[2]) + '</span>';
+        } else if (m[0] === 'null') {
+            out += '<span class="tok-null">null</span>';
+        } else {
+            out += '<span class="tok-num">' + esc(m[0]) + '</span>';
+        }
+        last = re.lastIndex;
+    }
+    return out + esc(json.slice(last));
+}
+
+function highlightTS(src) {
+    const re = /('(?:[^'\\]|\\.)*')|\b(text|html|attr|loop|object|json|nullable)\b|\b(\d+)\b/g;
+    let out = '';
+    let last = 0;
+    let m;
+    while ((m = re.exec(src))) {
+        out += esc(src.slice(last, m.index));
+        if (m[1]) out += '<span class="tok-str">' + esc(m[1]) + '</span>';
+        else if (m[2]) out += '<span class="tok-fn">' + m[2] + '</span>';
+        else out += '<span class="tok-num">' + m[3] + '</span>';
+        last = re.lastIndex;
+    }
+    return out + esc(src.slice(last));
+}
+
+/* ================================================================== */
+/* 选择器生成                                                          */
+/* ================================================================== */
+
+function matchesUniquely(sel, el, boundary, doc) {
+    const scope = boundary || doc;
+    try {
+        const hits = scope.querySelectorAll(sel);
+        return boundary ? hits.length === 1 : hits.length === 1 && hits[0] === el;
+    } catch (e) {
+        return false;
+    }
+}
+
+function cssPath(el, boundary, doc) {
+    const parts = [];
+    let cur = el;
+    let guard = 0;
+
+    while (cur && cur.nodeType === 1 && guard++ < 14) {
+        if (boundary && cur === boundary) break;
+
+        if (cur.id) {
+            parts.unshift('#' + cssEsc(cur.id));
+            const sel = parts.join(' > ');
+            if (boundary || matchesUniquely(sel, el, null, doc)) return sel;
+            break;
+        }
+
+        let part = cur.tagName.toLowerCase();
+        const cls = Array.from(cur.classList || []).filter(isSimpleClass);
+        if (cls.length) part += '.' + cls.map(cssEsc).join('.');
+
+        if (!matchesUniquely([part].concat(parts).join(' > '), el, boundary, doc) && cur.parentElement) {
+            const siblings = Array.from(cur.parentElement.children).filter(x => x.tagName === cur.tagName);
+            part += ':nth-of-type(' + (siblings.indexOf(cur) + 1) + ')';
+        }
+
+        parts.unshift(part);
+        if (matchesUniquely(parts.join(' > '), el, boundary, doc)) return parts.join(' > ');
+
+        cur = cur.parentElement;
+        if (!boundary && cur === doc.documentElement) {
+            parts.unshift('html');
+            break;
+        }
+    }
+
+    return parts.join(' > ');
+}
+
+/* ================================================================== */
+/* Schema 编辑器渲染                                                   */
+/* ================================================================== */
+
+function kindSelect(f) {
+    const wrap = document.createElement('div');
+    wrap.className = 'sel';
+
+    const sel = document.createElement('select');
+    sel.className = 'inp';
+    sel.style.borderLeft = '3px solid ' + KIND_COLOR[f.kind];
+    sel.style.paddingLeft = '5px';
+
+    for (const kind of Object.keys(KIND_LABEL)) {
+        const opt = document.createElement('option');
+        opt.value = kind;
+        opt.textContent = KIND_LABEL[kind];
+        if (kind === f.kind) opt.selected = true;
+        sel.appendChild(opt);
+    }
+
+    sel.addEventListener('change', () => {
+        f.kind = sel.value;
+        normalize(f);
+        renderEditor();
+        updateOutputs();
+    });
+
+    wrap.appendChild(sel);
+    return wrap;
+}
+
+function normalize(f) {
+    if (f.kind === 'attr' && !f.attr) f.attr = 'href';
+    if (f.kind === 'loop' || f.kind === 'object') {
+        if (!f.children) f.children = [];
+        if (f.kind === 'loop' && !f.children.length && !f.scalar) {
+            f.children.push(newField({ key: 'value', selector: '' }));
+        }
+    }
+}
+
+function detailNode(f, fieldPath) {
+    const d = document.createElement('div');
+    d.className = 'field-detail';
+
+    if (f.kind === 'attr') {
+        const lab = document.createElement('span');
+        lab.className = 'detail-label';
+        lab.textContent = '属性';
+        const inp = document.createElement('input');
+        inp.className = 'inp mono';
+        inp.value = f.attr || '';
+        inp.placeholder = 'href';
+        inp.style.width = '72px';
+        inp.spellcheck = false;
+        inp.addEventListener('input', () => { f.attr = inp.value; updateOutputs(); });
+        inp.addEventListener('focus', () => setActive(f.id));
+        d.append(lab, inp);
+    }
+
+    if (f.kind === 'text' || f.kind === 'html' || f.kind === 'attr') {
+        const lab = document.createElement('span');
+        lab.className = 'detail-label';
+        lab.textContent = '序号';
+        const inp = document.createElement('input');
+        inp.className = 'inp mono';
+        inp.value = f.index == null ? '' : f.index;
+        inp.placeholder = '全部';
+        inp.title = '留空取全部；填 0 取第一个，1 取第二个';
+        inp.style.width = '38px';
+        inp.spellcheck = false;
+        inp.addEventListener('input', () => { f.index = inp.value; updateOutputs(); });
+        inp.addEventListener('focus', () => setActive(f.id));
+        d.append(lab, inp);
+    }
+
+    if (f.kind !== 'json') {
+        const label = document.createElement('label');
+        label.className = 'chk';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = !!f.nullable;
+        cb.addEventListener('change', () => { f.nullable = cb.checked; updateOutputs(); });
+        const span = document.createElement('span');
+        span.textContent = '未匹配 → null';
+        label.append(cb, span);
+        d.appendChild(label);
+    }
+
+    const hint = document.createElement('span');
+    hint.className = 'path-hint';
+    hint.textContent = fieldPath;
+    d.appendChild(hint);
+
+    return d;
+}
+
+function childrenNode(f, fieldPath) {
+    const box = document.createElement('div');
+    box.className = 'children';
+
+    const head = document.createElement('div');
+    head.className = 'child-head';
+
+    const caption = document.createElement('span');
+    caption.textContent = f.kind === 'loop' ? '逐项' : '子树';
+    head.appendChild(caption);
+
+    if (f.kind === 'loop') {
+        const label = document.createElement('label');
+        label.className = 'chk';
+        label.style.marginLeft = 'auto';
+        label.style.textTransform = 'none';
+        label.style.letterSpacing = '0';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = !!f.scalar;
+        cb.addEventListener('change', () => {
+            f.scalar = cb.checked;
+            if (f.scalar && !f.children.length) f.children.push(newField({ selector: '' }));
+            if (!f.scalar) {
+                f.children.forEach(c => {
+                    if (!String(c.key || '').trim()) c.key = 'value';
+                });
+            }
+            renderEditor();
+            updateOutputs();
+        });
+        const span = document.createElement('span');
+        span.textContent = '标量数组';
+        label.append(cb, span);
+        head.appendChild(label);
+    }
+
+    box.appendChild(head);
+
+    if (f.kind === 'loop' && f.scalar) {
+        if (!f.children.length) f.children.push(newField({ selector: '' }));
+        box.appendChild(fieldNode(f.children[0], f.children, fieldPath + '[]', f, true));
+    } else {
+        box.appendChild(fieldsNode(f.children, fieldPath + '[]', f));
+    }
+
+    const add = document.createElement('button');
+    add.className = 'add-child';
+    add.textContent = '+ 添加字段';
+    add.addEventListener('click', () => {
+        const child = newField({ key: nextKey(), selector: '' });
+        f.children.push(child);
+        state.activeId = child.id;
+        renderEditor();
+        updateOutputs();
+    });
+    box.appendChild(add);
+
+    return box;
+}
+
+function fieldNode(f, siblings, parentPath, parentField, hideKey) {
+    f.__parent = parentField || null;
+
+    const wrap = document.createElement('div');
+    wrap.className = 'field' + (f.id === state.activeId ? ' active' : '');
+    wrap.dataset.id = f.id;
+
+    const row = document.createElement('div');
+    row.className = 'field-row';
+    row.addEventListener('mousedown', () => setActive(f.id));
+
+    if (hideKey) {
+        const ph = document.createElement('div');
+        ph.className = 'key-ph';
+        ph.textContent = '值';
+        row.appendChild(ph);
+    } else {
+        const keyInp = document.createElement('input');
+        keyInp.className = 'inp mono';
+        keyInp.value = f.key || '';
+        keyInp.placeholder = '字段名';
+        keyInp.spellcheck = false;
+        keyInp.dataset.key = f.id;
+        keyInp.addEventListener('input', () => {
+            f.key = keyInp.value;
+            updateOutputs();
+        });
+        keyInp.addEventListener('focus', () => setActive(f.id));
+        row.appendChild(keyInp);
+    }
+
+    row.appendChild(kindSelect(f));
+
+    const selInp = document.createElement('input');
+    selInp.className = 'inp mono';
+    selInp.value = f.selector || '';
+    selInp.placeholder = 'CSS 选择器';
+    selInp.spellcheck = false;
+    selInp.dataset.sel = f.id;
+    selInp.addEventListener('input', () => {
+        f.selector = selInp.value;
+        updateOutputs();
+    });
+    selInp.addEventListener('focus', () => setActive(f.id));
+    row.appendChild(selInp);
+
+    const del = document.createElement('button');
+    del.className = 'row-del';
+    del.innerHTML = '&times;';
+    del.title = '删除字段';
+    del.addEventListener('click', e => {
+        e.stopPropagation();
+        const i = siblings.indexOf(f);
+        if (i > -1) siblings.splice(i, 1);
+        if (state.activeId === f.id) state.activeId = null;
+        renderEditor();
+        updateOutputs();
+    });
+    row.appendChild(del);
+
+    wrap.appendChild(row);
+
+    const fieldPath = (parentPath ? parentPath + '.' : '') + (f.key || '·');
+    wrap.appendChild(detailNode(f, fieldPath));
+
+    if (f.kind === 'loop' || f.kind === 'object') {
+        wrap.appendChild(childrenNode(f, fieldPath));
+    }
+
+    return wrap;
+}
+
+function fieldsNode(fields, parentPath, parentField) {
+    const frag = document.createDocumentFragment();
+    for (const f of fields) {
+        frag.appendChild(fieldNode(f, fields, parentPath, parentField, false));
+    }
+    return frag;
+}
+
+function renderEditor() {
+    const host = $('fields');
+    host.innerHTML = '';
+    host.appendChild(fieldsNode(state.rules, '', null));
+
+    const add = document.createElement('button');
+    add.id = 'add-field';
+    add.textContent = '+ 添加字段';
+    add.addEventListener('click', () => {
+        const f = newField({ key: nextKey(), selector: '' });
+        state.rules.push(f);
+        state.activeId = f.id;
+        renderEditor();
+        updateOutputs();
+    });
+    host.appendChild(add);
+
+    updateHint();
+}
+
+function setActive(id) {
+    state.activeId = id;
+    document.querySelectorAll('.field').forEach(el => {
+        el.classList.toggle('active', Number(el.dataset.id) === id);
+    });
+    updateHint();
+}
+
+function findFieldById(id, list) {
+    const pool = list || state.rules;
+    for (const f of pool) {
+        if (f.id === id) return f;
+        if (f.children && f.children.length) {
+            const hit = findFieldById(id, f.children);
+            if (hit) return hit;
+        }
+    }
+    return null;
+}
+
+function countFields(list) {
+    return list.reduce((sum, f) => sum + 1 + (f.children ? countFields(f.children) : 0), 0);
+}
+
+function updateHint() {
+    const f = findFieldById(state.activeId);
+    $('pick-hint').textContent = f
+        ? '当前字段「' + (f.key || '未命名') + '」· 点击左侧元素回填选择器'
+        : '未选中字段 · 点击左侧元素自动新建字段';
+}
+
+/* ================================================================== */
+/* 输出渲染                                                            */
+/* ================================================================== */
+
+function renderOut() {
+    const host = $('out');
+    host.innerHTML = '';
+
+    if (state.tab === 'code') {
+        const pre = document.createElement('pre');
+        pre.className = 'code';
+        pre.innerHTML = highlightTS(buildCode());
+        host.appendChild(pre);
+        return;
+    }
+
+    if (state.errors.length) {
+        const box = document.createElement('div');
+        box.className = 'err-list';
+        const title = document.createElement('b');
+        title.textContent = '解析提示（' + state.errors.length + '）';
+        box.appendChild(title);
+        state.errors.slice(0, 6).forEach(e => {
+            const line = document.createElement('div');
+            line.innerHTML = '<code>' + esc(e.path || '(根)') + '</code> ' + esc(e.message);
+            box.appendChild(line);
+        });
+        if (state.errors.length > 6) {
+            const more = document.createElement('div');
+            more.textContent = '还有 ' + (state.errors.length - 6) + ' 条…';
+            box.appendChild(more);
+        }
+        host.appendChild(box);
+    }
+
+    const pre = document.createElement('pre');
+    pre.className = 'code';
+    pre.innerHTML = state.result === null
+        ? '<span class="tok-null">null</span>'
+        : highlightJSON(state.result);
+    host.appendChild(pre);
+}
+
+function markErrors() {
+    document.querySelectorAll('.field').forEach(el => el.classList.remove('err'));
+    const ids = new Set(state.errors.map(e => e.id).filter(Boolean));
+    ids.forEach(id => {
+        const el = document.querySelector('.field[data-id="' + id + '"]');
+        if (el) el.classList.add('err');
+    });
+}
+
+function updateOutputs() {
+    const t0 = performance.now();
+    const errors = [];
+    let result = null;
+
+    try {
+        const schema = toSchema(state.rules, errors, '');
+        const doc = new DOMParser().parseFromString(state.html || '', 'text/html');
+        result = runSchema([doc], schema, '', errors);
+    } catch (err) {
+        errors.push({ path: '(根)', message: err.message });
+        result = null;
+    }
+
+    state.result = result;
+    state.errors = errors;
+    state.ms = performance.now() - t0;
+
+    renderOut();
+    markErrors();
+
+    const bad = errors.filter(e => !/已跳过|重复/.test(e.message)).length;
+    $('out-foot').textContent =
+        countFields(state.rules) + ' 个字段 · 解析 ' + state.ms.toFixed(1) + ' ms · ' +
+        (errors.length ? (bad ? bad + ' 个错误' : errors.length + ' 条提示') : '无错误');
+}
+
+/* ================================================================== */
+/* 预览交互                                                            */
+/* ================================================================== */
+
+function bindFrame() {
+    const frame = $('frame');
+    const doc = frame.contentDocument;
+    if (!doc) return;
+
+    const style = doc.createElement('style');
+    style.textContent =
+        '[data-rp-hover]{outline:2px solid #0a84ff !important;outline-offset:2px !important;' +
+        'background-color:rgba(10,132,255,.10) !important;cursor:crosshair !important}' +
+        '[data-rp-pick]{outline:2px dashed #28cd41 !important;outline-offset:2px !important}';
+    if (doc.head) doc.head.appendChild(style);
+
+    doc.addEventListener('click', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.target && e.target.nodeType === 1) pickElement(e.target);
+    }, true);
+
+    doc.addEventListener('submit', e => e.preventDefault(), true);
+
+    doc.addEventListener('mouseover', e => {
+        const t = e.target;
+        if (t && t.nodeType === 1) t.setAttribute('data-rp-hover', '');
+    }, true);
+
+    doc.addEventListener('mouseout', e => {
+        const t = e.target;
+        if (t && t.nodeType === 1) t.removeAttribute('data-rp-hover');
+    }, true);
+}
+
+function boundaryFor(field, doc, el) {
+    let p = field && field.__parent;
+    while (p) {
+        if ((p.kind === 'loop' || p.kind === 'object') && p.selector) {
+            let scope = [];
+            try { scope = Array.from(doc.querySelectorAll(p.selector)); } catch (e) { scope = []; }
+            const hits = scope.filter(node => node.contains(el));
+            if (hits.length) return hits[hits.length - 1];
+        }
+        p = p.__parent;
+    }
+    return null;
+}
+
+function pickElement(el) {
+    const doc = el.ownerDocument;
+    const target = findFieldById(state.activeId);
+    const boundary = boundaryFor(target, doc, el);
+    const sel = cssPath(el, boundary, doc);
+
+    doc.querySelectorAll('[data-rp-pick]').forEach(n => n.removeAttribute('data-rp-pick'));
+    el.setAttribute('data-rp-pick', '');
+
+    if (!target) {
+        const f = newField({ key: nextKey(), kind: 'text', selector: sel });
+        state.rules.push(f);
+        state.activeId = f.id;
+        renderEditor();
+        updateOutputs();
+        toast('已新建字段 ' + f.key + ' ← ' + (sel || '(自身)'));
+        return;
+    }
+
+    target.selector = sel;
+    const inp = document.querySelector('[data-sel="' + target.id + '"]');
+    if (inp) {
+        inp.value = sel;
+        flash(inp);
+    }
+    updateOutputs();
+    toast((boundary ? '相对 ' + boundary.tagName.toLowerCase() + ' 回填 ' : '已回填 ') + (sel || '(自身)'));
+}
+
+/* ================================================================== */
+/* 事件                                                                */
+/* ================================================================== */
+
+function setSeg(id, tab) {
+    document.querySelectorAll('#' + id + ' button').forEach(btn => {
+        btn.classList.toggle('on', btn.dataset.tab === tab);
+    });
+}
+
+function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+        return navigator.clipboard.writeText(text);
+    }
+    return new Promise((resolve, reject) => {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+            document.execCommand('copy') ? resolve() : reject(new Error('copy failed'));
+        } catch (err) {
+            reject(err);
+        } finally {
+            ta.remove();
+        }
+    });
+}
+
+function init() {
+    const frame = $('frame');
+    const source = $('source');
+
+    state.rules = defaultRules();
+    state.activeId = state.rules[0].id;
+    state.html = SAMPLE_HTML;
+
+    source.value = SAMPLE_HTML;
+    frame.addEventListener('load', bindFrame);
+    frame.srcdoc = SAMPLE_HTML;
+
+    renderEditor();
+    updateOutputs();
+
+    $('html-tabs').addEventListener('click', e => {
+        const btn = e.target.closest('button');
+        if (!btn) return;
+        setSeg('html-tabs', btn.dataset.tab);
+        const preview = btn.dataset.tab === 'preview';
+        $('frame-wrap').classList.toggle('hidden', !preview);
+        $('source-wrap').classList.toggle('hidden', preview);
+    });
+
+    $('out-tabs').addEventListener('click', e => {
+        const btn = e.target.closest('button');
+        if (!btn) return;
+        state.tab = btn.dataset.tab;
+        setSeg('out-tabs', state.tab);
+        renderOut();
+    });
+
+    let srcTimer = null;
+    source.addEventListener('input', () => {
+        state.html = source.value;
+        updateOutputs();
+        clearTimeout(srcTimer);
+        srcTimer = setTimeout(() => {
+            frame.srcdoc = state.html;
+        }, 450);
+    });
+
+    $('reset').addEventListener('click', () => {
+        state.rules = defaultRules();
+        state.activeId = state.rules[0].id;
+        renderEditor();
+        updateOutputs();
+        toast('已恢复示例字段');
+    });
+
+    $('copy').addEventListener('click', () => {
+        const text = state.tab === 'code'
+            ? buildCode()
+            : JSON.stringify(state.result, null, 2);
+        copyText(text)
+            .then(() => toast(state.tab === 'code' ? '代码已复制' : '结果已复制'))
+            .catch(() => toast('复制失败，请手动选择'));
+    });
+
+    document.addEventListener('keydown', e => {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+            updateOutputs();
+            toast('已重新解析');
+        }
+    });
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+} else {
+    init();
+}
+
+})();
+</script>
+</body>
+</html>

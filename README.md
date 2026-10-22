@@ -324,6 +324,8 @@ npx tsx crawler.ts
 
 > 仓库里的 [`example.ts`](./example.ts) 是同一套流程的可运行版本：本地起一个测试站点（含 GBK 页面），跑通请求 → 并发 → 解析，`npm run dev` 直接看结果。
 
+> 浏览器打开 [`playground.html`](./playground.html) 可以可视化编辑 `html2object` 的 schema：左侧点击页面元素自动生成选择器，中间增删字段，右侧实时预览解析结果并生成对应的 TS 代码。零依赖单文件，双击即用。
+
 ---
 
 ## 开发
