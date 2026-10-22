@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.1
+
+- 修复：`exports["."]` 顶层补声明 `"types": "./dist/index.d.ts"`，`moduleResolution: "nodenext"`（及部分 bundler）下不再报"找不到类型声明"
+
 ## 1.0.0
 
 首个稳定版。三个模块互相独立：HTTP 请求 / 并发任务池 / HTML 结构化解析。
