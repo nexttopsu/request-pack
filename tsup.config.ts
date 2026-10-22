@@ -1,12 +1,11 @@
 import { defineConfig } from 'tsup';
 
 /**
- * tsup 构建配置
- * - 同时输出 CJS（.cjs）和 ESM（.mjs）产物
- * - 生成 .d.ts 类型声明文件
- * - 代码压缩，但保留类名 / 函数名：错误类名是调用方排查问题的第一线索
- *   （错误消息里只写类型、不写表名，类名被压成单字母后日志将无法阅读）
- * - 保留 node: 协议前缀（node:sqlite 只能通过 node: 协议访问）
+ * 构建配置
+ * - 同时输出 CJS（.cjs）与 ESM（.mjs），各配一份类型声明
+ * - target 与 package.json 的 engines 保持一致（Node 18）
+ * - 压缩但保留类名/函数名，错误信息与堆栈才不会变成单字母，便于排查
+ * - 保留 node: 协议前缀，避免运行时解析差异
  */
 export default defineConfig({
     entry: ['src/index.ts'],
@@ -15,7 +14,7 @@ export default defineConfig({
     minify: true,
     keepNames: true,
     clean: true,
-    target: 'node20',
+    target: 'node18',
     sourcemap: false,
     removeNodeProtocol: false,
     outExtension: ({ format }) => ({ js: format === 'cjs' ? '.cjs' : '.mjs' })
