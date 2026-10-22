@@ -27,3 +27,7 @@ components.d.ts
 
 .temp
 .workbuddy
+
+.tmp
+coverage.log
+*.tgz

@@ -13,7 +13,11 @@
     "declaration": true,
     "stripInternal": true,
     "noEmit": true,
-    "types": ["node"]
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "request-pack": ["./src/index.ts"]
+    }
   },
   "include": ["src/**/*", "test/**/*", "example.ts"],
   "exclude": ["node_modules", "dist"]

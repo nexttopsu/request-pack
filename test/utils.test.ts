@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { delay, decode, resolveUrl, getBaseHref, getDocumentBase } from '../src/lib/utils.ts';
+import * as utils from '../src/lib/utils.ts';
 import iconv from 'iconv-lite';
 
 describe('utils', () => {
@@ -33,5 +34,11 @@ describe('utils', () => {
         const html = '<head><base href="/static/"></head>';
         assert.equal(getDocumentBase(html, 'https://example.com/dir/page'), 'https://example.com/static/');
         assert.equal(getDocumentBase('<head></head>', 'https://example.com/dir/page'), 'https://example.com/dir/page');
+    });
+
+    it('透出 iconv 本体，方便直接用更多编码能力', () => {
+        assert.equal(utils.iconv, iconv);
+        assert.equal(utils.iconv.decode(utils.iconv.encode('測試', 'big5'), 'big5'), '測試');
+        assert.equal(utils.iconv.encodingExists('shift_jis'), true);
     });
 });

@@ -37,6 +37,24 @@ before(async () => {
             res.end(JSON.stringify({ ok: true, attempts: hits[url] }));
             return;
         }
+        if (url === '/retry-after') {
+            // 第一次 429 并带 Retry-After，第二次成功
+            if (hits[url] < 2) {
+                res.writeHead(429, { 'retry-after': '0.05' });
+                res.end('slow down');
+                return;
+            }
+            res.writeHead(200, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ ok: true }));
+            return;
+        }
+        if (url === '/no-charset') {
+            // 响应头与 meta 都不带 charset，只能靠 createHttp 的 encoding 兜底
+            const body = iconv.encode('<html><body>兜底编码</body></html>', 'gbk');
+            res.writeHead(200, { 'content-type': 'text/plain' });
+            res.end(body);
+            return;
+        }
         if (url === '/json') {
             res.writeHead(200, { 'content-type': 'application/json' });
             res.end(JSON.stringify({ hello: 'world' }));
@@ -102,6 +120,12 @@ describe('createHttp · 编码识别', () => {
         assert.equal(detectCharset({ 'content-type': 'text/html' }, Buffer.from('no charset here')), undefined);
         assert.equal(detectCharset({ 'content-type': 'text/html; charset=totally-fake' }, Buffer.from('')), undefined);
     });
+
+    it('嗅探不出来时用 encoding 兜底', async () => {
+        const http = createHttp({ encoding: 'gbk' });
+        const text = await http.getText(`${base}/no-charset`);
+        assert.match(text, /兜底编码/);
+    });
 });
 
 describe('createHttp · 重试', () => {
@@ -122,6 +146,35 @@ describe('createHttp · 重试', () => {
         const http = createHttp({ retry: { retries: 5, delay: 1, shouldRetry: () => false } });
         await assert.rejects(() => http.get(`${base}/flaky-veto`), /503/);
         assert.equal(hits['/flaky-veto'], 1);
+    });
+
+    it('retry 传数字时按次数重试', async () => {
+        const http = createHttp({ retry: 2 });
+        const data = await http.get<{ ok: boolean; attempts: number }>(`${base}/flaky-number`);
+        assert.equal(data.ok, true);
+        assert.equal(data.attempts, 3); // 首次 + 2 次重试
+    });
+
+    it('响应带 Retry-After 时按它等待', async () => {
+        const http = createHttp({ retry: { retries: 1, delay: 3000 } }); // 退避设很大，靠 Retry-After 才快
+        const start = Date.now();
+        const data = await http.get<{ ok: boolean }>(`${base}/retry-after`);
+        const elapsed = Date.now() - start;
+
+        assert.equal(data.ok, true);
+        assert.ok(elapsed < 2000, `未按 Retry-After 等待，耗时 ${elapsed}ms`);
+    });
+
+    it('重试耗尽后抛出最后一次的错误', async () => {
+        const http = createHttp({ retry: { retries: 1, delay: 1 } });
+        await assert.rejects(() => http.get(`${base}/flaky-exhaust`), /503/);
+        assert.equal(hits['/flaky-exhaust'], 2);
+    });
+
+    it('4xx 不在默认可重试范围内，直接抛错', async () => {
+        const http = createHttp({ retry: 3 });
+        await assert.rejects(() => http.get(`${base}/missing`), /404/);
+        assert.equal(hits['/missing'], 1);
     });
 });
 

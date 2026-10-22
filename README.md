@@ -25,7 +25,7 @@ import { createHttp, TaskPool, defineThreadTask, html2object, text, attr, loop }
 
 ## HTTP 客户端 `createHttp`
 
-基于官方 axios（`>= 1.16.1` 起原生支持 HTTPS 代理的 CONNECT 隧道）。**所有配置显式传入，没有任何隐藏默认值**——不传代理就是直连，不会被塞进某个本地端口。
+基于官方 axios（`>= 1.16.1` 起原生支持 HTTPS 代理的 CONNECT 隧道）。**不会偷偷挂代理**——不传 `proxy` 就是直连，也不会读 `HTTP_PROXY` 环境变量。其余默认值只有两个，且都可覆盖：`timeout: 30_000`、一个常见的桌面浏览器 `User-Agent`。
 
 ```ts
 import { createHttp } from 'request-pack';
@@ -92,6 +92,15 @@ interface ProxyConfig {
 > 不传 `proxy` 时会显式设置 `proxy: false`，**不会**继承 `HTTP_PROXY` / `HTTPS_PROXY` 环境变量——想要环境代理请显式传入。
 >
 > axios 不支持 socks 代理。需要 socks5 时，用 `http.instance.defaults.httpsAgent` 挂 `socks-proxy-agent`。
+
+编码嗅探也可以单独使用（例如你已经有一份 Buffer）：
+
+```ts
+import { detectCharset, utils } from 'request-pack';
+
+const charset = detectCharset(headers, buffer) ?? 'utf-8';
+const html = utils.decode(buffer, charset);
+```
 
 ---
 
@@ -278,6 +287,8 @@ const next = utils.resolveUrl(links, base);
 // crawler.ts
 import { createHttp, defineThreadTask, TaskPool, html2object, text, attr, loop } from 'request-pack';
 import { cpus } from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { isMainThread } from 'node:worker_threads';
 
 const http = createHttp({ timeout: 15_000 });
 
@@ -290,7 +301,10 @@ export const task = defineThreadTask(async ({ url }: { url: string }) => {
 });
 
 async function main() {
-    const pool = new TaskPool({ worker: __filename, concurrency: cpus().length - 1 });
+    const pool = new TaskPool({
+        worker: fileURLToPath(import.meta.url),    // ESM 下没有 __filename
+        concurrency: cpus().length - 1,
+    });
     const urls = ['https://example.com/1', 'https://example.com/2'];
 
     const { results, errors } = await pool
@@ -300,22 +314,26 @@ async function main() {
     console.log(`成功 ${results.length}，失败 ${errors.length}`);
 }
 
-void main();
+// worker 线程会重新执行这个文件，必须拦住入口逻辑
+if (isMainThread) void main();
 ```
 
 ```bash
 npx tsx crawler.ts
 ```
 
+> 仓库里的 [`example.ts`](./example.ts) 是同一套流程的可运行版本：本地起一个测试站点（含 GBK 页面），跑通请求 → 并发 → 解析，`npm run dev` 直接看结果。
+
 ---
 
 ## 开发
 
 ```bash
-npm run dev           # tsx 运行 example.ts
+npm run dev           # 先构建，再跑 example.ts（走 dist 产物，验证 exports）
 npm test              # tsx --test，Node 内置 test runner
 npm run test:coverage # 带覆盖率（需 Node >= 20）
-npm run typecheck     # tsc --noEmit（含 test/ 目录）
+npm run test:smoke    # 产物冒烟：直接跑 dist，不依赖 tsx（可在 Node 18 上验证）
+npm run typecheck     # tsc --noEmit（含 test/ 与 example.ts）
 npm run build         # tsup 构建到 dist/
 ```
 
@@ -329,9 +347,13 @@ npm run build         # tsup 构建到 dist/
 
 ### 环境要求
 
-- 运行库：Node **>= 18.17**（`cheerio` 1.0 的下限）
-- 跑测试：Node **>= 18**（`tsx` 转译 TS，不需要额外测试框架）
-- CI 在 Node 18 / 20 / 22 三个版本上跑 `typecheck + test + build`
+| 用途 | 版本要求 | 原因 |
+|---|---|---|
+| 使用这个库 | Node **>= 18.17** | `cheerio` 1.0 的下限；产物 target 为 node18 |
+| 跑测试 | Node **>= 20** | 测试里的 worker 直接加载 `.ts`，依赖 Node 20 的 `module.register` |
+| 构建 | Node **>= 22.18** | `tsup` 9 的引擎要求 |
+
+CI 分三个 job：`test`（Node 20 / 22）、`build`（Node 22）、`compat`（Node 18 跑 `test:smoke` 验证产物能在引擎下限运行）。
 
 ## License
 

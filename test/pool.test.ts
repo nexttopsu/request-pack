@@ -4,7 +4,7 @@ import path from 'node:path';
 import { TaskPool, defineThreadTask } from '../src/lib/pool.ts';
 
 // 测试从项目根目录运行，fixture 路径按 cwd 解析，避免 ESM/CJS 下的 __dirname / import.meta 差异
-const workerPath = path.resolve(process.cwd(), 'test/fixtures/worker.mjs');
+const workerPath = path.resolve(process.cwd(), 'test/fixtures/worker.ts');
 
 describe('TaskPool', () => {
     it('收集所有任务结果', async () => {
@@ -19,18 +19,27 @@ describe('TaskPool', () => {
     });
 
     it('并发不超过 concurrency', async () => {
-        const tasks = Array.from({ length: 6 }, (_, i) => ({ ms: 50, name: `t${i}` }));
+        // 用共享计数器记录子线程里真实的并发峰值，不靠计时（计时断言在 CI 上必然抖）
+        const measure = async (concurrency: number) => {
+            const counter = new Int32Array(new SharedArrayBuffer(8));
+            const pool = new TaskPool<string>({ worker: workerPath, concurrency });
+            const tasks = Array.from({ length: 6 }, (_, i) => ({
+                ms: 80,
+                name: `t${i}`,
+                counter: counter.buffer,
+            }));
 
-        // 用「串行 vs 3 并发」对比，避开线程冷启动的绝对耗时差异
-        const serialStart = Date.now();
-        await new TaskPool<string>({ worker: workerPath, concurrency: 1 }).addTasks(tasks).run();
-        const serial = Date.now() - serialStart;
+            await pool.addTasks(tasks).run();
+            return { peak: counter[1], running: counter[0] };
+        };
 
-        const parallelStart = Date.now();
-        await new TaskPool<string>({ worker: workerPath, concurrency: 3 }).addTasks(tasks).run();
-        const parallel = Date.now() - parallelStart;
+        const serial = await measure(1);
+        assert.equal(serial.peak, 1, '并发 1 时不应有任务重叠');
 
-        assert.ok(parallel < serial * 0.75, `并发未生效：串行 ${serial}ms，3 并发 ${parallel}ms`);
+        const parallel = await measure(3);
+        assert.ok(parallel.peak > 1, `并发未生效，峰值为 ${parallel.peak}`);
+        assert.ok(parallel.peak <= 3, `超出并发上限，峰值为 ${parallel.peak}`);
+        assert.equal(parallel.running, 0, '所有任务结束后计数应归零');
     });
 
     it('单个任务失败不中断整体，错误被收集并触发事件', async () => {
@@ -51,6 +60,8 @@ describe('TaskPool', () => {
         assert.equal(errors[0].error, 'boom: bad1');
         assert.equal(errors[0].reason, 'task');
         assert.deepEqual(errors[0].task, { ms: 5, name: 'bad1', fail: true });
+        // 子线程的原始堆栈要能带回主线程，否则线上排查只能看到一行消息
+        assert.match(errors[0].stack ?? '', /boom: bad1/);
         assert.equal(errorEvents.length, 1);
     });
 
@@ -140,6 +151,33 @@ describe('TaskPool · 线程复用', () => {
 
         assert.equal(errors.length, 1);
         assert.equal(errors[0].reason, 'disposed');
+    });
+
+    it('destroy 是 dispose 的别名', async () => {
+        const pool = new TaskPool<string>({ worker: workerPath, concurrency: 1, keepAlive: true });
+        const running = pool.addTasks([{ ms: 200, name: 'long' }]).run();
+
+        await pool.destroy();
+        const { errors } = await running;
+
+        assert.equal(errors[0].reason, 'disposed');
+    });
+
+    it('dispose 时还没派发的任务也记为 disposed', async () => {
+        const pool = new TaskPool<string>({ worker: workerPath, concurrency: 1, keepAlive: true });
+        const running = pool.addTasks([
+            { ms: 500, name: 'a' },
+            { ms: 5, name: 'b' },
+            { ms: 5, name: 'c' },
+        ]).run();
+
+        await pool.dispose();
+        const { results, errors } = await running;
+
+        assert.equal(results.length, 0);
+        assert.equal(errors.length, 3);
+        assert.ok(errors.every(e => e.reason === 'disposed'));
+        assert.deepEqual(errors.map(e => e.task.name), ['a', 'b', 'c']); // 仍是提交顺序
     });
 });
 

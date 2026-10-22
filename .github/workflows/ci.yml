@@ -8,11 +8,13 @@ on:
 
 jobs:
   test:
+    name: test (node ${{ matrix.node }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        node: [18, 20, 22]
+        # 测试用 tsx 直接跑 .ts，worker 里的 TS 加载依赖 Node 20+ 的 module.register
+        node: [20, 22]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -22,4 +24,40 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+
+  build:
+    name: build (node 22)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # tsup 9 要求 Node >= 22.18
+          node-version: 22
+          cache: npm
+      - run: npm ci
       - run: npm run build
+      - run: npm pack --dry-run
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+          retention-days: 1
+
+  compat:
+    name: runtime smoke (node 18)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # 验证 engines 下限：发布产物在 Node 18 上真的能跑（不装 devDependencies）
+          node-version: 18
+          cache: npm
+      - run: npm ci --omit=dev
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - run: npm run test:smoke

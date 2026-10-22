@@ -68,6 +68,8 @@ describe('html2object', () => {
         assert.throws(() => html2object(htmlStr, { bad: { type: 'unknown' } } as any), /未知/);
         assert.throws(() => html2object(htmlStr, { bad: 'not-a-field' } as any), /不是合法/);
         assert.throws(() => html2object(htmlStr, { bad: text(undefined as any) }), /selector/);
+        assert.throws(() => html2object(htmlStr, { bad: { type: 'loop', selector: 'li' } } as any), /子 schema/);
+        assert.throws(() => html2object(htmlStr, { bad: { type: 'object' } } as any), /子 schema/);
     });
 });
 
