@@ -39,6 +39,14 @@
     ],
     "author": "nexttopsu@gmail.com",
     "license": "ISC",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/nexttopsu/request-pack.git"
+    },
+    "homepage": "https://github.com/nexttopsu/request-pack#readme",
+    "bugs": {
+        "url": "https://github.com/nexttopsu/request-pack/issues"
+    },
     "engines": {
         "node": ">=16"
     },
