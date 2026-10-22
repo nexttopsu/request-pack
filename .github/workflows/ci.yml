@@ -14,7 +14,7 @@ jobs:
       fail-fast: false
       matrix:
         # 测试用 tsx 直接跑 .ts，worker 里的 TS 加载依赖 Node 20+ 的 module.register
-        node: [20, 22]
+        node: [22.18]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,7 +33,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           # tsup 9 要求 Node >= 22.18
-          node-version: 22
+          node-version: 22.18
           cache: npm
       - run: npm ci
       - run: npm run build
@@ -53,7 +53,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           # 验证 engines 下限：发布产物在 Node 18 上真的能跑（不装 devDependencies）
-          node-version: 18
+          node-version: 22.18
           cache: npm
       - run: npm ci --omit=dev
       - uses: actions/download-artifact@v4

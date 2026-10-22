@@ -35,6 +35,7 @@
     --toast-bg: rgba(32, 32, 38, .92);
 }
 
+
 @media (prefers-color-scheme: dark) {
     :root {
         --desk-1: #0e0e12;
@@ -72,11 +73,12 @@ html, body {
 }
 
 body {
-    font: 13px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
     color: var(--text);
     background: var(--desk-1);
     -webkit-font-smoothing: antialiased;
     overflow: auto;
+    padding: 10px;
 }
 
 body::before {
@@ -100,10 +102,9 @@ body::before {
     z-index: 1;
     display: flex;
     flex-direction: column;
-    height: calc(100vh - 56px);
+    height: calc(100vh - 20px);
     min-height: 560px;
     min-width: 900px;
-    margin: 28px;
     background: var(--window);
     border-radius: 11px;
     overflow: hidden;
@@ -329,7 +330,7 @@ body::before {
 
 .inp.mono {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11.5px;
+    font-size: 13px;
 }
 
 .sel { position: relative; min-width: 0; }
