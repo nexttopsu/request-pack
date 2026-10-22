@@ -592,6 +592,112 @@ iframe {
     background: var(--sel);
 }
 
+/* ---------- Schema JSON 模式 ---------- */
+
+#json-wrap { background: var(--pane-alt); }
+
+#schema-json {
+    flex: 1;
+    width: 100%;
+    min-height: 0;
+    resize: none;
+    border: 0;
+    outline: none;
+    padding: 10px 12px;
+    background: transparent;
+    color: var(--text);
+    font: 11.5px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace;
+    tab-size: 2;
+}
+
+.json-foot {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    border-top: .5px solid var(--line);
+    background: var(--pane-alt);
+}
+
+.json-status {
+    flex: 1;
+    min-width: 0;
+    padding-left: 2px;
+    font-size: 10.5px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.json-status.bad { color: var(--danger); }
+
+.json-foot .text-btn { flex: none; height: 22px; padding: 0 8px; font-size: 11px; }
+
+.text-btn.primary {
+    background: var(--blue);
+    border-color: transparent;
+    color: #fff;
+    font-weight: 500;
+}
+
+.text-btn.primary:hover { background: #0a7aeb; color: #fff; }
+
+@media (prefers-color-scheme: dark) {
+    .text-btn.primary:hover { background: #3b9bff; }
+}
+
+/* ---------- 确认弹窗 ---------- */
+
+.modal-mask {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    display: grid;
+    place-items: center;
+    background: rgba(0, 0, 0, .20);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    opacity: 0;
+    transition: opacity .16s ease;
+}
+
+.modal-mask.show { opacity: 1; }
+
+.modal {
+    width: 318px;
+    padding: 18px 18px 14px;
+    border-radius: 12px;
+    background: var(--window);
+    box-shadow:
+        0 0 0 .5px rgba(0, 0, 0, .18),
+        0 24px 60px rgba(0, 0, 0, .30);
+    transform: scale(.95) translateY(6px);
+    transition: transform .19s cubic-bezier(.2, .9, .3, 1);
+}
+
+.modal-mask.show .modal { transform: none; }
+
+.modal-title {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+
+.modal-text {
+    font-size: 12px;
+    line-height: 1.58;
+    color: var(--text-2);
+}
+
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
+}
+
 /* ---------- 输出 ---------- */
 
 .out {
@@ -725,9 +831,22 @@ iframe {
             <div class="pane-head">
                 <span class="pane-title">字段</span>
                 <div class="spacer"></div>
+                <div class="seg" id="mode-tabs">
+                    <button data-mode="form" class="on">表单</button>
+                    <button data-mode="json">JSON</button>
+                </div>
                 <button class="text-btn" id="reset">重置</button>
             </div>
             <div class="pane-body scroll" id="fields"></div>
+            <div class="pane-body hidden" id="json-wrap">
+                <textarea id="schema-json" spellcheck="false" autocomplete="off" aria-label="schema JSON"></textarea>
+                <div class="json-foot">
+                    <span class="json-status" id="json-status"></span>
+                    <button class="text-btn" id="json-copy">复制</button>
+                    <button class="text-btn" id="json-format">格式化</button>
+                    <button class="text-btn primary" id="json-apply">应用</button>
+                </div>
+            </div>
         </section>
 
         <section class="pane pane-result">
@@ -743,6 +862,17 @@ iframe {
             <div class="pane-body scroll out" id="out"></div>
             <div class="pane-foot" id="out-foot"></div>
         </section>
+    </div>
+</div>
+
+<div class="modal-mask hidden" id="modal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <div class="modal-title" id="modal-title">确认</div>
+        <div class="modal-text" id="modal-text"></div>
+        <div class="modal-actions">
+            <button class="text-btn" id="modal-cancel">取消</button>
+            <button class="text-btn primary" id="modal-ok">确定</button>
+        </div>
     </div>
 </div>
 
@@ -862,6 +992,7 @@ const state = {
     rules: [],
     activeId: null,
     tab: 'json',
+    mode: 'form',
     result: null,
     errors: [],
     ms: 0,
@@ -1055,6 +1186,75 @@ function toSchema(fields, errors, path) {
             errors.push({ id: f.id, path: path || '(根)', message: '字段名 "' + key + '" 重复' });
         }
         out[key] = toField(f);
+    }
+    return out;
+}
+
+/* ================================================================== */
+/* Schema JSON <-> 编辑器字段                                          */
+/* ================================================================== */
+
+const KINDS = Object.keys(KIND_LABEL);
+
+function schemaJSON() {
+    const schema = toSchema(state.rules, null, '');
+    return JSON.stringify(schema, (k, v) => (k === '__id' ? undefined : v), 2);
+}
+
+function fieldFromDesc(desc, path) {
+    if (!desc || typeof desc !== 'object' || Array.isArray(desc)) {
+        throw new Error(path + ' 应为字段对象');
+    }
+    if (typeof desc.type !== 'string') {
+        throw new Error(path + ' 缺少 type');
+    }
+    if (KINDS.indexOf(desc.type) === -1) {
+        throw new Error(path + ' 的 type "' + desc.type + '" 不支持');
+    }
+
+    const f = newField({
+        kind: desc.type,
+        selector: typeof desc.selector === 'string' ? desc.selector : '',
+    });
+
+    if (desc.index !== undefined) {
+        const n = Number(desc.index);
+        if (!Number.isFinite(n)) throw new Error(path + ' 的 index 必须是数字');
+        f.index = String(n);
+    }
+    if (desc.nullable === true) f.nullable = true;
+    if (desc.type === 'attr') f.attr = typeof desc.name === 'string' && desc.name ? desc.name : 'href';
+
+    if (desc.type === 'object') {
+        f.children = fieldsFromSchema(desc.schema, path);
+    } else if (desc.type === 'loop') {
+        const item = desc.schema;
+        if (typeof item === 'string') {
+            throw new Error(path + ' 的 schema 不能是字符串，请写成 { type, selector } 或对象');
+        }
+        if (item && typeof item === 'object' && typeof item.type === 'string') {
+            f.scalar = true;
+            const only = fieldFromDesc(item, path + '[]');
+            only.key = '';
+            f.children = [only];
+        } else {
+            f.children = fieldsFromSchema(item, path);
+        }
+    }
+
+    return f;
+}
+
+function fieldsFromSchema(schema, path) {
+    if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
+        throw new Error((path || '(根)') + ' 的 schema 应为对象');
+    }
+    const out = [];
+    for (const key of Object.keys(schema)) {
+        if (key === '__id') continue;
+        const f = fieldFromDesc(schema[key], (path ? path + '.' : '') + key);
+        f.key = key;
+        out.push(f);
     }
     return out;
 }
@@ -1521,6 +1721,13 @@ function countFields(list) {
     return list.reduce((sum, f) => sum + 1 + (f.children ? countFields(f.children) : 0), 0);
 }
 
+function countUnnamed(list) {
+    return list.reduce((sum, f) => {
+        const self = String(f.key || '').trim() ? 0 : 1;
+        return sum + self + (f.children ? countUnnamed(f.children) : 0);
+    }, 0);
+}
+
 function updateHint() {
     const f = findFieldById(state.activeId);
     $('pick-hint').textContent = f
@@ -1657,6 +1864,11 @@ function boundaryFor(field, doc, el) {
 }
 
 function pickElement(el) {
+    if (state.mode === 'json' && !applyJSON(true)) {
+        toast('schema JSON 有误，先修正再回填选择器');
+        return;
+    }
+
     const doc = el.ownerDocument;
     const target = findFieldById(state.activeId);
     const boundary = boundaryFor(target, doc, el);
@@ -1691,7 +1903,7 @@ function pickElement(el) {
 
 function setSeg(id, tab) {
     document.querySelectorAll('#' + id + ' button').forEach(btn => {
-        btn.classList.toggle('on', btn.dataset.tab === tab);
+        btn.classList.toggle('on', (btn.dataset.tab || btn.dataset.mode) === tab);
     });
 }
 
@@ -1714,6 +1926,118 @@ function copyText(text) {
             ta.remove();
         }
     });
+}
+
+let jsonDirty = false;
+let jsonInputTimer = null;
+let modalOnOk = null;
+
+function setJsonStatus(msg, bad) {
+    const el = $('json-status');
+    el.textContent = msg;
+    el.classList.toggle('bad', !!bad);
+}
+
+function schemaFromText(text) {
+    let parsed;
+    try {
+        parsed = JSON.parse(text);
+    } catch (err) {
+        throw new Error('JSON 语法错误：' + err.message);
+    }
+    return fieldsFromSchema(parsed, '');
+}
+
+function syncJSON() {
+    $('schema-json').value = schemaJSON();
+    jsonDirty = false;
+    const unnamed = countUnnamed(state.rules);
+    setJsonStatus(
+        '共 ' + countFields(state.rules) + ' 个字段' +
+        (unnamed ? '（' + unnamed + ' 个未命名未写入）' : '') +
+        ' · 改完点「应用」或切回表单',
+        false
+    );
+}
+
+function applyJSON(quiet) {
+    let rules;
+    try {
+        rules = schemaFromText($('schema-json').value);
+    } catch (err) {
+        setJsonStatus(err.message, true);
+        if (!quiet) toast(err.message);
+        return false;
+    }
+
+    state.rules = rules;
+    state.activeId = rules.length ? rules[0].id : null;
+    jsonDirty = false;
+    renderEditor();
+    updateOutputs();
+
+    $('schema-json').value = schemaJSON();
+    setJsonStatus('已应用 · ' + countFields(rules) + ' 个字段', false);
+    if (!quiet) toast('已应用 schema JSON');
+    return true;
+}
+
+function setMode(mode) {
+    if (mode === state.mode) return;
+
+    if (mode === 'form' && jsonDirty && !applyJSON(true)) {
+        setSeg('mode-tabs', 'json');
+        return;
+    }
+
+    state.mode = mode;
+    setSeg('mode-tabs', mode);
+    $('fields').classList.toggle('hidden', mode !== 'form');
+    $('json-wrap').classList.toggle('hidden', mode !== 'json');
+
+    if (mode === 'json') syncJSON();
+    else updateHint();
+}
+
+function modalOpen() {
+    return !$('modal').classList.contains('hidden');
+}
+
+function openModal(opts) {
+    $('modal-title').textContent = opts.title;
+    $('modal-text').textContent = opts.text;
+    $('modal-ok').textContent = opts.okText || '确定';
+    modalOnOk = opts.onOk || null;
+
+    const mask = $('modal');
+    mask.classList.remove('hidden');
+    void mask.offsetWidth;
+    mask.classList.add('show');
+    $('modal-cancel').focus();
+}
+
+function closeModal() {
+    const mask = $('modal');
+    mask.classList.remove('show');
+    modalOnOk = null;
+    setTimeout(() => {
+        if (!mask.classList.contains('show')) mask.classList.add('hidden');
+    }, 180);
+}
+
+function confirmModal() {
+    const fn = modalOnOk;
+    closeModal();
+    if (fn) fn();
+}
+
+function doReset() {
+    state.rules = defaultRules();
+    state.activeId = state.rules.length ? state.rules[0].id : null;
+    renderEditor();
+    updateOutputs();
+    if (state.mode === 'json') syncJSON();
+    toast('已恢复示例字段');
 }
 
 function init() {
@@ -1758,12 +2082,57 @@ function init() {
         }, 450);
     });
 
+    $('mode-tabs').addEventListener('click', e => {
+        const btn = e.target.closest('button');
+        if (btn) setMode(btn.dataset.mode);
+    });
+
+    $('schema-json').addEventListener('input', () => {
+        jsonDirty = true;
+        clearTimeout(jsonInputTimer);
+        jsonInputTimer = setTimeout(() => {
+            try {
+                const rules = schemaFromText($('schema-json').value);
+                setJsonStatus('● 未应用 · ' + countFields(rules) + ' 个字段', false);
+            } catch (err) {
+                setJsonStatus(err.message, true);
+            }
+        }, 180);
+    });
+
+    $('json-apply').addEventListener('click', () => applyJSON(false));
+
+    $('json-format').addEventListener('click', () => {
+        const ta = $('schema-json');
+        const before = ta.value;
+        try {
+            ta.value = JSON.stringify(JSON.parse(before), null, 2);
+            if (ta.value !== before) jsonDirty = true;
+            setJsonStatus(jsonDirty ? '已格式化 · 未应用' : '已格式化', false);
+        } catch (err) {
+            setJsonStatus('JSON 语法错误：' + err.message, true);
+        }
+    });
+
+    $('json-copy').addEventListener('click', () => {
+        copyText($('schema-json').value)
+            .then(() => toast('schema JSON 已复制'))
+            .catch(() => toast('复制失败，请手动选择'));
+    });
+
+    $('modal-ok').addEventListener('click', confirmModal);
+    $('modal-cancel').addEventListener('click', closeModal);
+    $('modal').addEventListener('mousedown', e => {
+        if (e.target === $('modal')) closeModal();
+    });
+
     $('reset').addEventListener('click', () => {
-        state.rules = defaultRules();
-        state.activeId = state.rules[0].id;
-        renderEditor();
-        updateOutputs();
-        toast('已恢复示例字段');
+        openModal({
+            title: '重置字段？',
+            text: '当前 ' + countFields(state.rules) + ' 个字段会被清空，恢复为示例 schema。此操作无法撤销。',
+            okText: '重置',
+            onOk: doReset,
+        });
     });
 
     $('copy').addEventListener('click', () => {
@@ -1776,7 +2145,22 @@ function init() {
     });
 
     document.addEventListener('keydown', e => {
+        if (modalOpen()) {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                closeModal();
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                confirmModal();
+            }
+            return;
+        }
+
         if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+            if (state.mode === 'json') {
+                applyJSON(false);
+                return;
+            }
             updateOutputs();
             toast('已重新解析');
         }
