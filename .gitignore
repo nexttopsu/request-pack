@@ -24,3 +24,6 @@ dist-ssr
 *.sw?
 auto-imports.d.ts
 components.d.ts
+
+.temp
+.workbuddy

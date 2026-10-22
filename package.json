@@ -1,30 +1,41 @@
 {
     "name": "request-pack",
-    "version": "0.4.0",
-    "description": "",
-    "source": "./src/index.ts",
+    "version": "1.0.0",
+    "description": "轻量爬虫工具包：HTTP 请求 / 并发任务池 / HTML 结构化解析",
+    "main": "./dist/index.cjs",
+    "module": "./dist/index.mjs",
     "types": "./dist/index.d.ts",
-    "main": "./dist/index.js",
-    "module": "./dist/index.module.js",
-    "unpkg": "./dist/index.umd.js",
     "exports": {
-        "require": "./dist/index.js",
-        "default": "./dist/index.modern.mjs"
+        ".": {
+            "import": {
+                "types": "./dist/index.d.mts",
+                "default": "./dist/index.mjs"
+            },
+            "require": {
+                "types": "./dist/index.d.ts",
+                "default": "./dist/index.cjs"
+            }
+        },
+        "./package.json": "./package.json"
     },
     "files": [
         "dist/",
         "README.md"
     ],
     "scripts": {
-        "dev": "ts-node-dev --respawn --transpile-only ./src/index.ts",
-        "test": "ts-node-dev --respawn --transpile-only ./test/test.ts",
-        "watch": "microbundle watch",
-        "build": "rimraf ./dist && microbundle --tsconfig ./tsconfig.json"
+        "dev": "tsx example.ts",
+        "build": "tsup",
+        "typecheck": "tsc --noEmit",
+        "test": "node --test test/parser.test.ts test/pool.test.ts test/utils.test.ts",
+        "prepublishOnly": "npm run build"
     },
     "keywords": [
-        "request pack",
-        "utils",
-        "format"
+        "crawler",
+        "request",
+        "worker",
+        "task-pool",
+        "html-parser",
+        "utils"
     ],
     "author": "nexttopsu@gmail.com",
     "license": "ISC",
@@ -32,14 +43,19 @@
         "node": ">=16"
     },
     "devDependencies": {
-        "microbundle": "^0.15.1",
-        "rimraf": "^5.0.5",
-        "ts-node-dev": "^2.0.0",
-        "typescript": "^5.4.3"
+        "@types/node": "^22.10.0",
+        "tsup": "^9.0.0",
+        "tsx": "^4.19.2",
+        "typescript": "^5.7.2"
     },
     "dependencies": {
-        "axios-https-proxy-fix": "^0.17.1",
+        "axios": "^1.20.0",
         "cheerio": "^1.0.0-rc.12",
         "iconv-lite": "^0.6.3"
+    },
+    "allowScripts": {
+        "esbuild@0.21.5": true,
+        "esbuild@0.27.7": true,
+        "esbuild@0.28.2": true
     }
 }

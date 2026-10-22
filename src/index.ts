@@ -1,9 +1,5 @@
-export * from './lib/Worker';
-export * from './lib/request';
-export * from './lib/html2object';
+export * from './lib/http';
+export * from './lib/pool';
+export * from './lib/parser';
 
-import * as utils from './lib/utils';
-
-export {
-    utils
-}
+export * as utils from './lib/utils';

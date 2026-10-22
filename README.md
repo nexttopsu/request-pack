@@ -1,131 +1,119 @@
-## 安装
+# request-pack
 
-### npm install
+轻量爬虫工具包：**HTTP 请求 → 并发调度 → 结构化解析**，三个模块正交，可独立使用。
 
 ```bash
 npm install request-pack
-```
-
-
-
-### yarn install
-
-```bash
+# 或
 yarn add request-pack
 ```
 
+## HTTP `createHttp`
 
+所有配置显式传入，无任何隐藏默认值（不传代理就是直连）。
 
-## 使用
+```ts
+import { createHttp } from 'request-pack';
 
-### 多线程 `worker`
+const http = createHttp({
+    timeout: 30_000,
+    proxy: { host: '127.0.0.1', port: 1080 }, // 不需要代理就不传
+});
 
-```js
-import { Worker, utils } from 'request-pack';
+// get / post 直接返回 data（不再是 AxiosResponse）
+const data = await http.get('https://www.baidu.com');
+const result = await http.post('https://api.example.com', { a: 1 });
+
+// 二进制内容用专门的方法
+const buf = await http.getBuffer('https://www.baidu.com/img/flexible/logo/pc/result.png');
+// fs.writeFileSync('./logo.png', buf);
+
+// 需要更细粒度控制时，可拿到底层 axios 实例
+http.instance.defaults.headers['User-Agent'] = 'Mozilla/5.0 ...';
+```
+
+## 并发任务池 `TaskPool`
+
+基于 `worker_threads`。主线程侧是 `TaskPool`，子线程侧用 `defineThreadTask` 注册处理器，两者彻底分离，全程 Promise，错误不会被吞掉。
+
+```ts
+// ── my-worker.ts（任务处理器 + 主线程逻辑可以写在同一个文件）──
+import { defineThreadTask, TaskPool } from 'request-pack';
 import { cpus } from 'os';
 
-new Worker({
-    worker: __filename, // 使用当前文件执行子线程
-    pip: cpus().length - 1, // 线程数量，默认3个
-
-    // 主线程，添加任务
-    main(worker) {
-        worker.addTask(Array.from({length: 1000}).map((_, i) => ({ i }))).start();
-    },
-
-    // 子线程，执行任务  data => { i: 0 }
-    thread: async (data: { i: number }) => {
-        await utils.delay(Math.random() * 1000);
-        console.log('执行结束 ....', data);
-    },
-
-    // 任务执行完毕
-    done(worker) {
-        console.log('任务全部执行完毕', worker);
-    },
+// 子线程执行体：主线程 import 时是空操作，不会产生副作用
+export const task = defineThreadTask(async (data: { url: string }) => {
+    return await fetchAndParse(data.url);
 });
-```
 
+// 主线程：创建任务池并等待完成
+async function main() {
+    const pool = new TaskPool({
+        worker: __filename,                    // 本文件作为 worker 脚本
+        concurrency: cpus().length - 1,        // 线程数，默认 3
+    });
 
+    // 可选：进度与任务级错误事件
+    pool.on('progress', ({ done, total }) => console.log(`${done}/${total}`));
+    pool.on('taskError', ({ task, error }) => console.error('任务失败', task, error));
 
-### 请求 `request`
-
-```js
-import { request_inst, request, request_buffer } from 'request-pack'
-
-request_inst.defaults.proxy = {
-    host: "127.0.0.1",
-    port: 1080
+    const { results, errors } = await pool
+        .addTasks(urls.map(url => ({ url })))
+        .run();  // 单个任务失败不会中断整体，失败的任务收集在 errors 里
 }
-request_inst.defaults.headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 6.1; Win64; WOW64) AppleWebKit/537.36 (KHTML, like Gecko/2010010 Safari/537.36';
-
-// 不使用代理
-request('https://www.baidu.com').then(res => {
-    console.log(res);
-});
-
-// 使用代理发送请求
-request('https://www.youtube.com', undefined, true).then(res => {
-    console.log(res);
-});
-
-// 获取buffer
-request_buffer('https://www.baidu.com/img/flexible/logo/pc/result.png').then(res => {
-    // 保存图片
-    // const buff = res.data;
-    // fs.writeFileSync(path.resolve('./test.png'), buff);
-    console.log(res);
-});
 ```
 
+## HTML 解析 `html2object`
 
+用类型安全的 schema 组合器代替魔法字符串，结果类型自动推导，`loop` 输出对象数组，支持嵌套。
 
-### HTML 转 Object `html2object`
+```ts
+import { html2object, text, html, attr, loop } from 'request-pack';
 
-```js
-import { html2object } from 'request-pack'
+const schema = {
+    title: text('title'),
+    h1:    html('h1.todo'),
+    list:  loop('#list li', {
+        href: attr('data-href'),
+        name: text('span'),
+        // 需要时还可以继续嵌套 loop
+    }),
+};
 
-const html = `<html>
-<head><title>标题</title></head>
-<body>
-
-<h1 class="todo"><span>Todo</span></h1>
-<ul id="list">
-    <li data-href="/1"><span>1</span></li>
-    <li data-href="/2"><span>2</span></li>
-    <li data-href="/3"><span>3</span></li>
-</ul>
-</body>
-<html>`
-
-const result = html2object(html, {
-    title: 'title/text()',
-    h1: '.todo/text()',
-    h1_html: '.todo/html()',
-    list: '#list li/loop(/attr(data-href), span/text())'
-});
-
-console.log(result);
-// ==> result
-// {
-//     title: '标题',
-//     h1: 'Todo',
-//     h1_html: '<span>Todo</span>',
-//     list: [ [ '/1', '1' ], [ '/2', '2' ], [ '/3', '3' ] ]
-// }
+const data = html2object(html, schema, ['.ad']); // 第三参可选：解析前移除干扰节点
+// => {
+//      title: '标题',
+//      h1: '<span>Todo</span>',
+//      list: [{ href: '/1', name: '1' }, { href: '/2', name: '2' }, ...]
+//    }
 ```
 
+非法 schema 会直接抛出带字段名的错误，不再静默丢失。
 
+## utils
 
-### utils
-
-```js
+```ts
 import { utils } from 'request-pack';
 
-// utils.delay
-await utils.delay(2000); // 等待 毫秒
-
-// utils.decode
-utils.decode(buffer, 'UTF-8'); // 转编码
+await utils.delay(2000);            // 等待毫秒
+utils.decode(buffer, 'gbk');        // 按编码解码 buffer（iconv-lite）
+utils.iconv;                        // iconv-lite 本体
 ```
 
+## 开发
+
+```bash
+npm run dev         # tsx 运行 example.ts
+npm test            # Node 内置 test runner（node --test，需 Node >= 22）
+npm run typecheck   # tsc --noEmit
+npm run build       # tsup 构建 CJS(.cjs) + ESM(.mjs) + 类型声明到 dist/
+```
+
+## 运行时要求
+
+- 库本身：Node >= 16
+- 跑测试：Node >= 22（Node 内置 test runner 直接执行 .ts，无需额外测试框架）
+
+## License
+
+ISC
