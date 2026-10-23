@@ -1,7 +1,7 @@
 {
     "name": "request-pack",
     "version": "1.1.1",
-    "description": "轻量爬虫工具包：HTTP 请求 / 并发任务池 / HTML 结构化解析",
+    "description": "轻量请求工具包：HTTP 请求 / 并发任务池 / HTML 结构化解析",
     "main": "./dist/index.cjs",
     "module": "./dist/index.mjs",
     "types": "./dist/index.d.ts",
