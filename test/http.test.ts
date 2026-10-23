@@ -116,6 +116,8 @@ describe('createHttp · 编码识别', () => {
     it('detectCharset 优先响应头，其次 meta，都不认识返回 undefined', () => {
         const gbkBody = iconv.encode('<meta charset="gb2312">', 'gbk');
         assert.equal(detectCharset({ 'content-type': 'text/html; charset=gbk' }, gbkBody), 'gbk');
+        // 带引号的 charset 也要认，否则会漏掉一批不规范站点
+        assert.equal(detectCharset({ 'content-type': 'text/html; charset="gbk"' }, Buffer.from('')), 'gbk');
         assert.equal(detectCharset({ 'content-type': 'text/html' }, gbkBody), 'gbk');
         assert.equal(detectCharset({ 'content-type': 'text/html' }, Buffer.from('no charset here')), undefined);
         assert.equal(detectCharset({ 'content-type': 'text/html; charset=totally-fake' }, Buffer.from('')), undefined);
@@ -175,6 +177,12 @@ describe('createHttp · 重试', () => {
         const http = createHttp({ retry: 3 });
         await assert.rejects(() => http.get(`${base}/missing`), /404/);
         assert.equal(hits['/missing'], 1);
+    });
+
+    it('retries 传 NaN 时按 0 处理，不无限重试', async () => {
+        const http = createHttp({ retry: { retries: Number.NaN } });
+        await assert.rejects(() => http.get(`${base}/flaky-nan`), /503/);
+        assert.equal(hits['/flaky-nan'], 1);
     });
 });
 

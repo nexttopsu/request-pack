@@ -127,6 +127,21 @@ describe('TaskPool · 超时与崩溃', () => {
         assert.equal(errors[0].reason, 'crash');
         assert.deepEqual(errors[0].task, { name: 'boom', crash: true });
     });
+
+    it('worker 以 code 0 提前退出时记为 crash，不悬挂', { timeout: 5000 }, async () => {
+        // 典型场景：worker 文件漏写 defineThreadTask，线程初始化完就退出。
+        // 没有任何回包，若不结算，run() 会永久挂起。
+        const exitPath = path.resolve(process.cwd(), 'test/fixtures/exit0.ts');
+        const pool = new TaskPool<string>({ worker: exitPath, concurrency: 1 });
+
+        const { results, errors } = await pool.addTask({ name: 'lost' }).run();
+
+        assert.equal(results.length, 0);
+        assert.equal(errors.length, 1);
+        assert.equal(errors[0].reason, 'crash');
+        assert.match(errors[0].error, /exited before replying/);
+        assert.deepEqual(errors[0].task, { name: 'lost' });
+    });
 });
 
 describe('TaskPool · 线程复用', () => {

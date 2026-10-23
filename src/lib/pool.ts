@@ -173,7 +173,6 @@ export class TaskPool<R = any> extends EventEmitter {
                 this.settle(slot.id, false, { error: 'pool disposed', reason: 'disposed' });
             }
         }
-        this.queue = [];
         await this.terminateAll();
         if (this.running) {
             this.finish();
@@ -218,7 +217,18 @@ export class TaskPool<R = any> extends EventEmitter {
         worker.on('error', (err: Error) => this.onCrash(slot, err));
         // 某些崩溃（如 process.exit）只会触发 exit，不会触发 error
         worker.on('exit', (code: number) => {
-            if (code !== 0) this.onCrash(slot, new Error(`worker exited with code ${code}`));
+            if (code !== 0) {
+                this.onCrash(slot, new Error(`worker exited with code ${code}`));
+                return;
+            }
+            // code 0 退出但任务还没回包：worker 提前结束（漏写 defineThreadTask、
+            // 或 handler 里调了 process.exit(0)）。不再有回包，必须结算，否则 run() 永久挂起。
+            if (slot.id !== null) {
+                this.onCrash(
+                    slot,
+                    new Error('worker exited before replying（检查 worker 文件是否调用了 defineThreadTask）')
+                );
+            }
         });
 
         this.slots.push(slot);
@@ -239,12 +249,13 @@ export class TaskPool<R = any> extends EventEmitter {
         slot: Slot,
         msg: { id: number; ok: boolean; result?: R; error?: string; stack?: string }
     ): void {
+        // 超时/崩溃后已结算的任务可能迟到，slot.id 已被清空，直接丢弃。
+        // 必须先校验再清 timer：否则迟到消息会误清掉该线程当前新任务的超时计时器。
+        if (slot.id === null || msg.id !== slot.id) return;
         if (slot.timer) {
             clearTimeout(slot.timer);
             slot.timer = undefined;
         }
-        // 超时/崩溃后已结算的任务可能迟到，slot.id 已被清空，直接丢弃
-        if (slot.id === null || msg.id !== slot.id) return;
 
         const id = slot.id;
         slot.id = null;

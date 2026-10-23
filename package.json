@@ -1,6 +1,6 @@
 {
     "name": "request-pack",
-    "version": "1.0.1",
+    "version": "1.1.1",
     "description": "轻量爬虫工具包：HTTP 请求 / 并发任务池 / HTML 结构化解析",
     "main": "./dist/index.cjs",
     "module": "./dist/index.mjs",
@@ -33,7 +33,7 @@
         "test": "tsx --test test/parser.test.ts test/pool.test.ts test/utils.test.ts test/http.test.ts",
         "test:coverage": "tsx --test --experimental-test-coverage test/parser.test.ts test/pool.test.ts test/utils.test.ts test/http.test.ts",
         "test:smoke": "node test/smoke/compat.mjs",
-        "prepublishOnly": "npm run typecheck && npm test && npm run build"
+        "prepublishOnly": "npm run typecheck && npm test && npm run build && npm run test:smoke"
     },
     "sideEffects": false,
     "keywords": [

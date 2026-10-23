@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.1
+
+- 修复：worker 以 code 0 提前退出（最常见的是 worker 文件漏写 `defineThreadTask`）时任务永久挂起、`run()` 永不返回；现在记为 `crash` 并提示检查 `defineThreadTask`
+- 修复：超时 / 崩溃后迟到的回包可能误清同一线程下一个任务的超时计时器
+- 修复：`retry.retries` 传入 `NaN` 会导致无限重试；`retries` / `delay` / `factor` / `maxDelay` 非法值统一回落到默认
+- 增强：`Content-Type` 中带引号的 `charset="gbk"` 也能识别
+- 优化：`getText` / `getBuffer` 拿到的已是 Buffer 时不再二次拷贝
+- 工程：`prepublishOnly` 补上 `test:smoke`
+
 ## 1.0.1
 
 - 修复：`exports["."]` 顶层补声明 `"types": "./dist/index.d.ts"`，`moduleResolution: "nodenext"`（及部分 bundler）下不再报"找不到类型声明"

@@ -21,7 +21,7 @@ export interface RetryOptions {
     maxDelay?: number;
     /** 叠加随机抖动，避免多线程同时重试，默认 true */
     jitter?: boolean;
-    /** 自定义重试判定；不传时按网络错误 / 408 / 429 / 5xx 判定 */
+    /** 自定义重试判定；不传时按网络错误 / 408 / 425 / 429 / 500 / 502 / 503 / 504 判定 */
     shouldRetry?: (error: unknown, attempt: number) => boolean;
 }
 
@@ -51,11 +51,22 @@ export interface Http {
 
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 
+/** responseType: 'arraybuffer' 在 Node 下拿到的常是 Buffer，避免再整块拷贝一次 */
+function toBuffer(data: unknown): Buffer {
+    return Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBufferLike);
+}
+
 function defaultShouldRetry(error: any): boolean {
     const status: number | undefined = error?.response?.status;
     if (status !== undefined) return RETRYABLE_STATUS.has(status);
     // 没有响应 = 网络层失败（DNS、连接重置、超时等），值得重试
     return true;
+}
+
+/** 非负有限数，非法输入（NaN / -1 / undefined）回落到 fallback：retries 是 NaN 会导致无限重试 */
+function nonNegative(value: unknown, fallback: number): number {
+    const n = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(n) ? Math.max(0, n) : fallback;
 }
 
 function normalizeRetry(retry: number | RetryOptions | undefined) {
@@ -67,13 +78,13 @@ function normalizeRetry(retry: number | RetryOptions | undefined) {
         jitter: true,
         shouldRetry: defaultShouldRetry as (error: unknown, attempt: number) => boolean,
     };
-    if (typeof retry === 'number') return { ...base, retries: Math.max(0, retry) };
+    if (typeof retry === 'number') return { ...base, retries: nonNegative(retry, base.retries) };
     if (!retry) return base;
     return {
-        retries: Math.max(0, retry.retries ?? base.retries),
-        delay: retry.delay ?? base.delay,
-        factor: retry.factor ?? base.factor,
-        maxDelay: retry.maxDelay ?? base.maxDelay,
+        retries: nonNegative(retry.retries, base.retries),
+        delay: nonNegative(retry.delay, base.delay),
+        factor: nonNegative(retry.factor, base.factor),
+        maxDelay: nonNegative(retry.maxDelay, base.maxDelay),
         jitter: retry.jitter ?? base.jitter,
         shouldRetry: retry.shouldRetry ?? base.shouldRetry,
     };
@@ -97,7 +108,7 @@ function normalizeCharset(raw: string | undefined): string | undefined {
 /** 从响应头与 HTML 头部嗅探编码：Content-Type 优先，其次 <meta charset> */
 export function detectCharset(headers: Record<string, any> | undefined, body: Buffer): string | undefined {
     const contentType = String(headers?.['content-type'] ?? '');
-    const fromHeader = /charset\s*=\s*([\w-]+)/i.exec(contentType)?.[1];
+    const fromHeader = /charset\s*=\s*["']?([\w-]+)/i.exec(contentType)?.[1];
     const hit = normalizeCharset(fromHeader);
     if (hit) return hit;
 
@@ -182,14 +193,14 @@ export function createHttp(options: HttpOptions = {}): Http {
             send<T>({ ...config, method: 'POST', url, data }).then(res => res.data),
         getText: async (url: string, config: AxiosRequestConfig = {}) => {
             const res = await send<ArrayBuffer>({ ...config, method: 'GET', url, responseType: 'arraybuffer' });
-            const buffer = Buffer.from(res.data as unknown as ArrayBufferLike);
+            const buffer = toBuffer(res.data);
             const charset = detectCharset(res.headers as Record<string, any>, buffer)
                 ?? (encoding !== 'auto' ? encoding : 'utf-8');
             return iconv.decode(buffer, charset);
         },
         getBuffer: (url: string, config: AxiosRequestConfig = {}) =>
             send<ArrayBuffer>({ ...config, method: 'GET', url, responseType: 'arraybuffer' }).then(res =>
-                Buffer.from(res.data as unknown as ArrayBufferLike)
+                toBuffer(res.data)
             ),
     };
 }
