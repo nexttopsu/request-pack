@@ -7,9 +7,12 @@
  * 用法：npm run build && node test/smoke/compat.mjs
  */
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import {
     createHttp,
+    createFetcher,
     html2object,
     text,
     attr,
@@ -64,5 +67,57 @@ assert.deepEqual(results, [2, 4]);
 assert.equal(errors.length, 1);
 assert.equal(errors[0].error, 'unlucky');
 assert.equal(errors[0].reason, 'task');
+
+/* createFetcher：本地起服务跑一遍完整链路（fetch → html2object → 校验 → parser → 复验） */
+const FIXTURE = `<!doctype html><html><head><title>页面</title></head><body>
+<h1 class="title">主标题</h1>
+<div class="card"><h2>卡片</h2></div>
+<ul class="tags"><li>前端</li><li>解析</li></ul>
+<script type="application/ld+json">{"name":"商品","price":9.9}</script>
+</body></html>`;
+
+const server = createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(FIXTURE);
+});
+await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+const pageUrl = `http://127.0.0.1:${server.address().port}/page`;
+
+const request = createFetcher({
+    type: 'axios',
+    retries: 0,
+    timeoutMs: 5000,
+    schema: {
+        title: text('h1.title', { required: true }),
+        missing: nullable(text('.nope')),
+        tags: loop('ul.tags li', text(''), { minItems: 1 }),
+        card: object('.card', { name: text('h2') }),
+        ld: json('script[type="application/ld+json"]'),
+    },
+    parser: [async data => ({ ...data, title: `${data.title} ok` })],
+});
+const fetched = await request(pageUrl);
+assert.equal(fetched.title, '主标题 ok');
+assert.equal(fetched.missing, null);
+assert.deepEqual(fetched.tags, ['前端', '解析']);
+assert.equal(fetched.card.name, '卡片');
+assert.equal(fetched.ld.price, 9.9);
+assert.equal(typeof request.outputSchema.parse, 'function');
+assert.match(await request.raw(pageUrl), /<h1 class="title">/);
+const safe = await request.safe(pageUrl);
+assert.equal(safe.ok, true);
+assert.equal(safe.meta.transport, 'axios');
+assert.equal(safe.meta.status, 200);
+await request.close();
+
+/* CJS 产物：未安装 playwright 时 require('request-pack') 也不能报错（懒加载不被降级成 require） */
+const require = createRequire(import.meta.url);
+const cjs = require('request-pack');
+assert.equal(typeof cjs.createFetcher, 'function');
+assert.equal(typeof cjs.createHttp, 'function');
+assert.equal(typeof cjs.html2object, 'function');
+
+server.closeAllConnections?.();
+await new Promise(resolve => server.close(() => resolve()));
 
 console.log(`smoke ok on ${process.version}`);

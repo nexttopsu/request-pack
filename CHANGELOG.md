@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.2.0
+
+新增向后兼容的高层管线 `createFetcher`，把「请求 → HTML 结构化解析 → 输出校验 → 结果加工 → 复验」串成一次调用。**无破坏性变更**：既有 `createHttp` / `TaskPool` / `html2object` / `utils` 的公开签名与行为一律不变，`exports`、单入口与 4 个 dist 文件名不变，engines 仍是 `>=18.17`。
+
+### 新增 `createFetcher`
+
+- 一次编译、两处使用：创建时用 zod 的 `z.discriminatedUnion('type', …) + z.lazy()` 校验 Options 与整棵 Field 树，编译出 `outputSchema` 缓存进闭包；每次请求在 `html2object` 之后校验，在结果加工之后**用同一个 schema 复验**
+- 失败一律抛 `FetcherError`（`code` / `phase` / `fieldPath` / `plugin` / `url` / `cause`），不填空、不 coerce、不返回 partial 数据、无 strict/lenient 开关
+- **`parser` 配置取代插件系统**：结果加工函数或函数数组，按序串行 `await`（支持 Promise），上下文只读（`Object.freeze`）；不提供 `definePlugin` / `requires` / 钩子链 / 模块级注册表
+- `safe()` / `raw()` / `close()` / `outputSchema` / `with()`（含换 schema 的泛型重载）；`request(url, overrides)` 禁止运行时切换 schema
+- `retries` 直接映射到 `createHttp({ retry: { retries } })`，重试只覆盖 fetch，解析 / 校验 / 加工失败不重试；`timeoutMs` 同时映射到 axios `timeout` 与请求总时限
+- `type:'axios'` 与 `type:'browser'` 判别联合，browser 专属键在编译期与运行时双重拒绝；`proxy` 原样复用 `ProxyConfig`
+- Node 18 兼容：自实现 `composeSignals()`（不用 `AbortSignal.any()`）、`Symbol.asyncDispose` 运行时特性检测；README 如实说明 cheerio 同步解析无法被 signal 中断
+- browser 分支：Chromium 懒启动 + 实例内复用，playwright 仅 optional peer，CJS 产物用运行时构造的动态 `import()` 避免被降级成 `require`
+
+### 组合器（只加可选字段）
+
+- `text` / `html` / `attr` 的 options 新增 `required? / min? / max? / pattern?`；`loop` 新增第三参数 `{ minItems?, maxItems? }`；`json(selector, zodSchema?)` 可选覆盖输出校验
+- 约束只挂在 Field 上，`html2object` 仍是 best-effort、不据此报错；`ParsedResult<S>` 推导与现有测试完全不变
+- 导出 `isFieldShape()`，供 `compileFieldTree` 与解析器共用同一个判据
+
+### 依赖与工程
+
+- **硬依赖由 3 个增至 4 个**：axios / cheerio / iconv-lite / **zod `^4`**。校验是 `createFetcher` 的必需能力，从 `src/index.ts` 根入口直接 re-export，放 optional peer 会让 `import 'request-pack'` 直接失败；zod 是纯 JS、无平台 API，不影响 Node 18 下限
+- `playwright >=1.40.0` 进 `optional peerDependencies`（`peerDependenciesMeta.optional: true`），**绝不进 dependencies**，避免 Chromium 下载拖垮轻量定位
+- 版本 `1.1.1 → 1.2.0`，`package.json` 与 `package-lock.json`（顶部 + `packages[""]`）同步
+- `test/compiler.test.ts` / `test/fetcher.test.ts` 加入 `scripts.test` 与 `scripts.test:coverage` 的显式文件列表；`test/smoke/compat.mjs` 补 axios 完整链路与「未装 playwright 时 `require('request-pack')` 正常」断言
+- `test/smoke` 仍只用 Node 18 API；CI 三个 job 结构、构建产物表、`prepublishOnly`、cheerio `~1.0.0` 锁均不变
+- 顺带把 axios 的传递依赖 `follow-redirects` 从 1.16.1 锁到 1.16.3，`npm audit` 恢复 0 漏洞
+
 ## 1.1.1
 
 - 修复：worker 以 code 0 提前退出（最常见的是 worker 文件漏写 `defineThreadTask`）时任务永久挂起、`run()` 永不返回；现在记为 `crash` 并提示检查 `defineThreadTask`

@@ -1,15 +1,15 @@
 # request-pack
 
-**轻量请求工具包**：HTTP 请求 → 并发调度 → 结构化解析。
+**轻量请求工具包**：HTTP 请求 → 并发调度 → 结构化解析，外加一条把它们串起来的高层管线 `createFetcher`。
 
-三个模块互相独立，可以只用其中一个，也可以串成一条完整的抓取管线。Node 原生能力优先，依赖只留必要的三个（axios / cheerio / iconv-lite）。
+三个基础模块互相独立，可以只用其中一个，也可以组合使用。Node 原生能力优先，运行时硬依赖只有必要的四个（axios / cheerio / iconv-lite / zod）。`playwright` 是**可选 peer 依赖**，只有用 browser 分支才需要装，绝不会拖着 Chromium 一起下载。
 
 ```bash
 npm install request-pack
 ```
 
 ```ts
-import { createHttp, TaskPool, defineThreadTask, html2object, text, attr, loop } from 'request-pack';
+import { createHttp, TaskPool, defineThreadTask, html2object, createFetcher, text, attr, loop } from 'request-pack';
 ```
 
 ## 目录
@@ -17,6 +17,7 @@ import { createHttp, TaskPool, defineThreadTask, html2object, text, attr, loop }
 - [HTTP 客户端 `createHttp`](#http-客户端-createhttp)
 - [并发任务池 `TaskPool`](#并发任务池-taskpool)
 - [HTML 解析 `html2object`](#html-解析-html2object)
+- [高层管线 `createFetcher`](#高层管线-createfetcher)
 - [工具函数 `utils`](#工具函数-utils)
 - [完整示例](#完整示例)
 - [开发](#开发)
@@ -214,11 +215,11 @@ const data = html2object(page, {
 
 | 组合器 | 结果 | 说明 |
 |---|---|---|
-| `text(selector, { first?, index? })` | `string` | 取文本并 trim |
-| `html(selector, { first?, index? })` | `string` | 取 innerHTML 并 trim |
-| `attr(name, selector?, { index? })` | `string` | 取属性；省略 selector 时读当前节点自身 |
-| `json(selector)` | `any` | 把元素文本当 JSON 解析（典型场景：JSON-LD） |
-| `loop(selector, schema)` | `T[]` | 遍历匹配元素；schema 传对象 → 对象数组，传单个字段 → 标量数组 |
+| `text(selector, { first?, index?, required?, min?, max?, pattern? })` | `string` | 取文本并 trim |
+| `html(selector, { first?, index?, required?, min?, max?, pattern? })` | `string` | 取 innerHTML 并 trim |
+| `attr(name, selector?, { index?, required?, min?, max?, pattern? })` | `string` | 取属性；省略 selector 时读当前节点自身 |
+| `json(selector, zodSchema?)` | `any` | 把元素文本当 JSON 解析（典型场景：JSON-LD） |
+| `loop(selector, schema, { minItems?, maxItems? })` | `T[]` | 遍历匹配元素；schema 传对象 → 对象数组，传单个字段 → 标量数组 |
 | `object(selector?, schema)` | `T` | 在子树内解析，产出嵌套对象 |
 | `nullable(field)` | `string \| null` | 未匹配时返回 `null`，与「匹配但内容为空」区分开 |
 
@@ -226,6 +227,7 @@ const data = html2object(page, {
 - `text('li')` 默认会把**所有**匹配元素的文本拼在一起；只要第一个时加 `{ first: true }`，要第 N 个用 `{ index: n }`。
 - `loop` / `object` 支持**任意层嵌套**。
 - 第三个参数 `removeSelector: string[]` 可在解析前先移除干扰节点（广告、脚本等）。
+- `required?` / `min?` / `max?` / `pattern?` / `minItems?` / `maxItems?` 是**输出约束**：`html2object` 自身仍是 best-effort，不会据此报错；它们由 `createFetcher` 编译成输出校验规则（见下节）。这些可选字段不改变组合器的返回类型，`ParsedResult<S>` 推导与旧版完全一致。
 
 ```ts
 const data = html2object(page, {
@@ -253,6 +255,135 @@ html2object: 字段 "list[0].href" 缺少属性名 name
 html2object: 字段 "list" 不是合法的 schema 字段（请使用 text/html/attr/json/loop/object 组合器构造）
 html2object: 字段 "ld" 的内容不是合法 JSON：Unexpected token o
 ```
+
+---
+
+## 高层管线 `createFetcher`
+
+把「请求 → HTML 结构化解析 → zod 输出校验 → 结果加工 → 复验」串成一次调用。它不重写下面三个模块：抓取走 `createHttp().getText()`（自动识别 GBK），解析走 `html2object()`，校验由创建时编译出的 zod schema 负责。
+
+```ts
+import { createFetcher, text, nullable, loop } from 'request-pack';
+
+const request = createFetcher({
+    type: 'axios',                        // 'axios' | 'browser'
+    retries: 2,
+    timeoutMs: 20_000,
+    proxy: { host: '127.0.0.1', port: 1080 },
+    headers: { 'Accept-Language': 'zh-CN' },
+    logging: false,
+    schema: {
+        title: text('h1.title', { required: true }),
+        price: nullable(text('.price')),
+        tags: loop('.tag', text('')),
+    },
+    // parser：处理结果的函数，或函数数组；串行 await，支持 Promise
+    parser: [async (data) => ({ ...data, title: data.title.trim() })],
+});
+
+const res = await request('https://example.com/a');
+// res.title: string / res.price: string | null / res.tags: string[] —— 静态推导 + 运行时已校验
+console.log(res.title, res.price, res.tags);
+await request.close();
+```
+
+> **没有插件系统**，也没有 `definePlugin` / `requires` / 钩子链。要加工结果就传 `parser`；要改本次请求用 `request(url, overrides)`；要换字段用 `request.with({ schema })`。
+
+### 流水线顺序
+
+```
+fetch → html2object → outputSchema.parse → parser 函数链 → 同一个 outputSchema.parse → res
+```
+
+- `createHttp` 的重试**只包住 axios 请求**；browser 分支由 browserTransport 内部实现同等重试，同样只覆盖 fetch。所以**解析 / 校验 / 加工失败不会重试**，也不会额外包一层重试循环。
+- `raw(url)` 只跑到 fetch，跳过解析、校验与加工，返回原始 HTML，用来调选择器。
+- `parser` 数组按声明顺序**串行 `await` 执行**，每一步拿到上一步的返回值；上下文 `ctx` 是 `Object.freeze` 的只读对象 `{ url, finalUrl, status, html, transport }`。函数返回 `undefined` 表示沿用上一步结果（允许就地修改）。加工函数抛错会包装成 `phase:'plugin'` 的 `FetcherError`。
+- **加工后必须用同一个 `outputSchema` 再 `parse()` 一次**，否则类型与「输出一致」的保证都会失效。把 `required` 字段改成空串会在这里被拦下。
+- 任何失败（配置、抓取、解析、输出不符 schema、加工、超时）一律抛 `FetcherError`：不填空、不 coerce、不返回 partial 数据、没有 strict/lenient 开关。
+
+### 配置项与底层映射
+
+| 配置 | 映射到底层 | 默认 / 约束 |
+|---|---|---|
+| `type` | 选 `createHttp` 或 browserTransport | 必填 `'axios' \| 'browser'` |
+| `retries` | `createHttp({ retry: { retries } })`；browser 分支内部同等次数重试 | `0`，0–10 整数 |
+| `timeoutMs` | `createHttp({ timeout: timeoutMs })` + 请求级 `AbortSignal.timeout(ms)` 总时限 | `20_000`，100–300000 |
+| `proxy` | **原样复用 `ProxyConfig`**，透传 `createHttp({ proxy })` / `chromium.launch({ proxy })` | 不传即直连（`proxy:false`），不读环境变量 |
+| `headers` | `createHttp({ headers })` / `page.setExtraHTTPHeaders` | `{}`；键须是 RFC 7230 token，值不得含 CRLF |
+| `http` | 其余 `AxiosRequestConfig` 透传 `createHttp`；`timeout/proxy/headers` 以显式配置键为准 | — |
+| `logging` | `boolean \| Logger`（`{ info?, warn?, error? }`） | `false` / 省略 → noop，**不硬编码 `console`** |
+| `headless` | 仅 browser 分支 → `chromium.launch({ headless })` | `true` |
+| `schema` | 创建时 zod 校验整棵 Field 树 → 编译 `outputSchema`；解析时原样传给 `html2object` | 必填 |
+| `parser` | 结果加工函数 / 函数数组 | `[]` |
+| `removeSelector` | `html2object(html, schema, removeSelector)` 的第三参数 | — |
+| `waitUntil` / `blockResources` / `viewport` | browser 分支 → `page.goto` / `page.route` / `browser.newPage` | — |
+
+`type:'browser'` 才允许 `headless / waitUntil / blockResources / viewport`；`type:'axios'` 写 `headless` 会在 **TS 编译期和运行时都被拒绝**。其余校验规则：`retries` 0–10 整数、`timeoutMs` 100–300000、字段名 `/^[A-Za-z_][A-Za-z0-9_]{0,63}$/`、selector 长度 ≤ 500（**允许空串**）、`attr` 必须有 `name`、`loop` 必须有 `selector` 与 `schema`、Field 树嵌套深度 ≤ 8。错误信息的字段路径沿用解析器风格，如 `schema.tags[0].href.selector`。
+
+### 创建时编译 / 两处使用
+
+创建时用 `z.discriminatedUnion('type', …) + z.lazy()` 校验 Options 与整棵 Field 树，再 `compileFieldTree(schema)` 编译成 `z.ZodType<ParsedResult<S>>`，**缓存进闭包、全实例复用**。编译映射与 `html2object` 的运行时行为严格对齐：`text/html/attr → string`（约束 → `min/max/regex`，最后才 `.nullable()`）、`json → unknown`（可用 `json(selector, zodSchema)` 覆盖）、`loop + Schema 对象 → array(object(...))`、`loop + 单个 Field → array(compileField(...))`、`object → object(...)`。判定 loop 子 schema 用的是 `html2object` 里同一个 `isFieldShape()`。
+
+**schema 不允许运行时切换**：`request(url, overrides)` 只接受 `headers / signal / timeoutMs / proxy / http`，类型上 `schema?: never`，运行时也会拒绝。要换字段必须派生新实例：
+
+```ts
+const detail = request.with({ schema: { heading: text('h1') } });
+// detail 的类型是 Fetcher<{ heading: TextField }>，重新走完整校验与编译
+const plain = request.with({ timeoutMs: 5_000 });   // 不换 schema → Fetcher<原 S>
+```
+
+### `Fetcher<S>` 成员
+
+| 成员 | 行为 |
+|---|---|
+| `request(url, overrides?)` | `Promise<ParsedResult<S>>`，失败抛 `FetcherError` |
+| `request.safe(url, overrides?)` | `{ ok:true, data, meta } \| { ok:false, error, meta }`，**不抛错**；`meta = { finalUrl, status, elapsedMs, transport }` |
+| `request.raw(url, overrides?)` | 原始 HTML 字符串，跳过解析 / 校验 / 加工 |
+| `request.close()` | 释放连接池与浏览器，幂等；关闭后调用抛 `code:'CLOSED'` |
+| `request[Symbol.asyncDispose]` | 仅在运行时存在该 Symbol 时挂上 `close` |
+| `request.with(overrides)` | 派生新实例，可换 schema（泛型重载保证静态类型跟着变） |
+| `request.outputSchema` | 暴露编译后的 zod schema，供测试与复用 |
+
+### `FetcherError`
+
+统一 `extends Error`，字段 `{ code, phase, fieldPath?, plugin?, url?, cause? }`。`plugin` 字段保留枚举语义，现在用于标记出错的 `parser` 加工函数。
+
+| code | phase | 含义 |
+|---|---|---|
+| `INVALID_CONFIG` / `INVALID_SCHEMA` | `config` | 创建时配置 / Field 树非法、请求级 overrides 非法 |
+| `CLOSED` | `fetch` | 实例已 `close()` |
+| `FETCH_FAILED` / `ABORTED` | `fetch` | 抓取失败 / 被外部 `signal` 取消 |
+| `BROWSER_MISSING` / `BROWSER_FAILED` | `browser` | 未装 playwright / Chromium 启动或渲染失败 |
+| `TIMEOUT` | `timeout` | 超过 `timeoutMs` 总时限 |
+| `PARSE_FAILED` | `parse` | `html2object` 抛错（原 message 里的字段路径保留） |
+| `VALIDATE_FAILED` | `validate` | 解析结果或加工结果不符 `outputSchema`，`fieldPath` 如 `list[0].href` |
+| `TRANSFORM_FAILED` | `plugin` | `parser` 加工函数抛错 |
+| `UNEXPECTED` | `fetch` | 兜底 |
+
+### `nullable` 与 `required` 的区别
+
+| | 作用层面 | 未匹配 | 匹配但为空 |
+|---|---|---|---|
+| `nullable(field)` | 解析行为 + 静态类型 | `null`（类型变 `string \| null`） | `''` |
+| `required: true` | `outputSchema` 输出约束 | `''` → 校验失败 | `''` → 校验失败 |
+
+两者可以叠加：`nullable(text('.p', { required: true }))` 未匹配返回 `null` 合法，一旦匹配到空节点就仍会被拦。`html2object` 本身不会因为 `required` 报错，它仍是 best-effort。
+
+### 生命周期与 Node 18 注意点
+
+- **Node 18 没有 `Symbol.asyncDispose`，`await using` 不可用**，必须手动 `await request.close()`。`composeSignals()` 自行用 `AbortController` + 事件监听实现，不用 Node 18.17 上不存在的 `AbortSignal.any()`，并在 `finally` 里 `dispose()` 移除监听。
+- `timeoutMs` 是**单次请求总时限**（抓取 + 渲染 + 解析 + 校验）。axios 侧同时设 `timeout` 防底层挂死。**明确限制：cheerio 解析是同步 CPU 操作，无法被 signal 中断**，只能在阶段边界检查 `signal.aborted`，不要指望它能打断一次超大的解析。
+- browser 分支的 Chromium **懒启动 + 实例内复用**，不是每次 request 都 launch；`headless`、`proxy`、`waitUntil`、`blockResources`、`viewport` 分别映射到 launch / goto / route / newPage。
+
+### browser 分支与 playwright
+
+`playwright` 只放在 **optional peerDependencies**（`peerDependenciesMeta.optional: true`），不在 `dependencies` 里 —— 不装它也不影响 axios 分支，更不会触发 Chromium 下载。未安装时创建 browser 实例会给出可操作提示，不吐堆栈：
+
+```
+未安装 playwright：请执行 npm i playwright && npx playwright install chromium
+```
+
+CJS 产物里用运行时构造的动态 `import()` 加载 playwright，避免 esbuild 把它降级成 `require('playwright')`；`npm run test:smoke` 会在未安装 playwright 时验证 `require('request-pack')` 依然正常。
 
 ---
 
@@ -332,12 +463,14 @@ npx tsx crawler.ts
 
 ```bash
 npm run dev           # 先构建，再跑 example.ts（走 dist 产物，验证 exports）
-npm test              # tsx --test，Node 内置 test runner
-npm run test:coverage # 带覆盖率（需 Node >= 20）
+npm test              # tsx --test，Node 内置 test runner（显式列出 6 个测试文件）
+npm run test:coverage # 带覆盖率（需 Node >= 20），文件列表与 npm test 一致
 npm run test:smoke    # 产物冒烟：直接跑 dist，不依赖 tsx（可在 Node 18 上验证）
 npm run typecheck     # tsc --noEmit（含 test/ 与 example.ts）
 npm run build         # tsup 构建到 dist/
 ```
+
+`test/compiler.test.ts` 覆盖 zod 配置校验与编译映射，`test/fetcher.test.ts` 覆盖完整链路、parser 复验、重试边界、超时与生命周期；两者都已加入 `scripts.test` / `scripts.test:coverage` 的显式文件列表（不用 glob，所以必须手动登记）。
 
 ### 构建产物
 

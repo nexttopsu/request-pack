@@ -4,7 +4,25 @@ import { load, type CheerioAPI } from 'cheerio';
 /* Schema 组合器                                                       */
 /* ------------------------------------------------------------------ */
 
-export interface QueryOptions {
+/**
+ * 输出约束选项。
+ *
+ * 这些字段只是「挂在 Field 上」的元数据：html2object 自身仍是 best-effort，
+ * 不会据此报错或改写结果；由 createFetcher 编译 outputSchema 时读取，
+ * 在解析之后统一做校验。这样既有解析行为与现有测试完全不变。
+ */
+export interface FieldConstraints {
+    /** 不允许空串（编译为 z.string().min(1)）；nullable 只影响「未匹配」，不影响 required */
+    required?: boolean;
+    /** 字符串最小长度 */
+    min?: number;
+    /** 字符串最大长度 */
+    max?: number;
+    /** 正则约束，字符串形式会按 new RegExp 编译 */
+    pattern?: RegExp | string;
+}
+
+export interface QueryOptions extends FieldConstraints {
     /** 只取第一个匹配元素 */
     first?: boolean;
     /** 取第 N 个匹配元素（从 0 开始） */
@@ -23,22 +41,31 @@ export interface HtmlField extends QueryOptions {
     selector: string;
     nullable?: boolean;
 }
-export interface AttrField {
+export interface AttrField extends QueryOptions {
     type: 'attr';
     /** 属性名 */
     name: string;
     /** 可选的元素选择器，缺省时取当前节点自身的属性 */
     selector?: string;
-    /** 取第 N 个匹配元素（从 0 开始） */
-    index?: number;
     nullable?: boolean;
+}
+/** 只要求有 parse 方法，避免解析模块反向依赖 zod */
+export interface JsonSchemaLike {
+    parse(data: unknown): unknown;
 }
 export interface JsonField {
     type: 'json';
     /** 选择器，通常指向 <script type="application/ld+json"> */
     selector: string;
+    /** 可选的 zod schema：createFetcher 编译输出校验时用它替代 z.unknown()；html2object 会忽略它 */
+    schema?: JsonSchemaLike;
 }
-export interface LoopField<S extends Schema | Field = Schema> {
+/** 列表的条数约束，同样只在 createFetcher 的输出校验中生效 */
+export interface LoopOptions {
+    minItems?: number;
+    maxItems?: number;
+}
+export interface LoopField<S extends Schema | Field = Schema> extends LoopOptions {
     type: 'loop';
     /** 列表元素选择器 */
     selector: string;
@@ -65,10 +92,11 @@ export const html = (selector: string, options: QueryOptions = {}): HtmlField =>
 export const attr = (name: string, selector?: string, options: QueryOptions = {}): AttrField =>
     ({ type: 'attr', name, selector, ...options });
 /** 把元素文本当 JSON 解析（如 <script type="application/ld+json">） */
-export const json = (selector: string): JsonField => ({ type: 'json', selector });
+export const json = (selector: string, schema?: JsonSchemaLike): JsonField =>
+    ({ type: 'json', selector, ...(schema ? { schema } : {}) });
 /** 遍历列表，每个元素按子 schema 解析为对象；schema 传单个字段时解析为标量数组 */
-export const loop = <S extends Schema | Field>(selector: string, schema: S): LoopField<S> =>
-    ({ type: 'loop', selector, schema });
+export const loop = <S extends Schema | Field>(selector: string, schema: S, options: LoopOptions = {}): LoopField<S> =>
+    ({ type: 'loop', selector, schema, ...options });
 
 /** 在某个子树内解析，产出嵌套对象 */
 export function object<S extends Schema>(schema: S): ObjectField<S>;
@@ -108,7 +136,8 @@ export type ParsedResult<S extends Schema> = {
 
 const FIELD_TYPES = new Set(['text', 'html', 'attr', 'json', 'loop', 'object']);
 
-const isFieldShape = (value: any): boolean =>
+/** 判断 loop 的子 schema 是「单个 Field」还是「Schema 对象」。createFetcher 的编译器复用同一个判据 */
+export const isFieldShape = (value: any): boolean =>
     !!value && typeof value === 'object' && FIELD_TYPES.has(value.type);
 
 function validateField(path: string, field: any): Field {

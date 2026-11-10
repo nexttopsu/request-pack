@@ -1,6 +1,6 @@
 {
     "name": "request-pack",
-    "version": "1.1.1",
+    "version": "1.2.0",
     "description": "轻量请求工具包：HTTP 请求 / 并发任务池 / HTML 结构化解析",
     "main": "./dist/index.cjs",
     "module": "./dist/index.mjs",
@@ -30,8 +30,8 @@
         "dev": "npm run build && tsx example.ts",
         "build": "tsup",
         "typecheck": "tsc --noEmit",
-        "test": "tsx --test test/parser.test.ts test/pool.test.ts test/utils.test.ts test/http.test.ts",
-        "test:coverage": "tsx --test --experimental-test-coverage test/parser.test.ts test/pool.test.ts test/utils.test.ts test/http.test.ts",
+        "test": "tsx --test test/parser.test.ts test/pool.test.ts test/utils.test.ts test/http.test.ts test/compiler.test.ts test/fetcher.test.ts",
+        "test:coverage": "tsx --test --experimental-test-coverage test/parser.test.ts test/pool.test.ts test/utils.test.ts test/http.test.ts test/compiler.test.ts test/fetcher.test.ts",
         "test:smoke": "node test/smoke/compat.mjs",
         "prepublishOnly": "npm run typecheck && npm test && npm run build && npm run test:smoke"
     },
@@ -66,7 +66,16 @@
     "dependencies": {
         "axios": "^1.20.0",
         "cheerio": "~1.0.0",
-        "iconv-lite": "^0.6.3"
+        "iconv-lite": "^0.6.3",
+        "zod": "^4.0.0"
+    },
+    "peerDependencies": {
+        "playwright": ">=1.40.0"
+    },
+    "peerDependenciesMeta": {
+        "playwright": {
+            "optional": true
+        }
     },
     "allowScripts": {
         "esbuild@0.28.2": true
