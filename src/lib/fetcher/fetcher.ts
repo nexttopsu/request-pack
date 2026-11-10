@@ -223,9 +223,21 @@ export function createFetcherCore<S extends Schema>(
         return closePromise;
     };
 
-    /** 派生新实例：换 schema 时重新走完整校验与编译；请求级 overrides 永远不接受 schema */
-    const withOverrides = (overrides: FetcherWithOverrides<any>): Fetcher<any> =>
-        createFetcherCore({ ...baseOptions, ...overrides } as FetcherOptions<any>, deps);
+    /**
+     * 派生新实例：换 schema 时重新走完整校验与编译；请求级 overrides 永远不接受 schema。
+     *
+     * parser 加工函数是按「旧 schema 的结果形状」写的，换字段后继续沿用会访问不存在的
+     * 字段而抛错。因此只要传了新 schema 且没有显式提供 parser，就丢弃旧加工链；
+     * 显式传 parser（含空数组）时以传入为准。不换 schema 的 with() 仍照常继承全部配置。
+     */
+    const withOverrides = (overrides: FetcherWithOverrides<any>): Fetcher<any> => {
+        const merged = { ...baseOptions, ...overrides } as FetcherOptions<any>;
+        // 显式置空而不是 delete（配置属性是 readonly）；validateOptions 会把 undefined 归为 []
+        if (overrides.schema !== undefined && !('parser' in overrides)) {
+            return createFetcherCore({ ...merged, parser: undefined } as FetcherOptions<any>, deps);
+        }
+        return createFetcherCore(merged, deps);
+    };
 
     const fetcher = Object.assign(call, {
         safe,

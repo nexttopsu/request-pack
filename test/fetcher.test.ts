@@ -402,3 +402,46 @@ describe('createFetcher · 生命周期 / 回归', () => {
 function html2objectDirect<S extends Schema>(schema: S): ParsedResult<S> {
     return api.html2object(PAGE, schema);
 }
+
+describe('createFetcher · with 换 schema 与 parser 的边界（回归）', () => {
+    it('换 schema 时不继承旧 parser：README 的示例写法可正常运行', async () => {
+        const request = axiosFetcher({
+            timeoutMs: 5000,
+            schema: {
+                title: text('h1.title', { required: true }),
+                tags: loop('ul.tags li', text('')),
+            },
+            // 按旧结果形状写的加工函数：换 schema 后若被继承就会访问不存在的 title
+            parser: [data => ({ ...data, title: data.title.trim() })],
+        });
+        const detail = request.with({ schema: { heading: text('h1.title') } });
+        type _heading = Expect<Equal<Awaited<ReturnType<typeof detail>>['heading'], string>>;
+        void (0 as unknown as _heading);
+        assert.deepEqual(await detail(`${base}/page`), { heading: '主标题' });
+        assert.notEqual(request.outputSchema, detail.outputSchema, '换 schema 必须重新编译');
+        assert.equal((await request(`${base}/page`)).title, '主标题', '原实例的加工链不受影响');
+        await request.close();
+        await detail.close();
+    });
+
+    it('显式传 parser 以传入为准；不换 schema 的 with() 仍继承加工链', async () => {
+        const request = axiosFetcher({
+            timeoutMs: 5000,
+            schema: { title: text('h1.title', { required: true }) },
+            parser: [data => ({ ...data, title: `${data.title}!` })],
+        });
+        const explicit = request.with({
+            schema: { heading: text('h1.title') },
+            parser: [data => ({ ...data, heading: `${data.heading}?` })],
+        });
+        assert.deepEqual(await explicit(`${base}/page`), { heading: '主标题?' });
+        const empty = request.with({ schema: { heading: text('h1.title') }, parser: [] });
+        assert.deepEqual(await empty(`${base}/page`), { heading: '主标题' });
+        const same = request.with({ timeoutMs: 4000 });
+        assert.equal((await same(`${base}/page`)).title, '主标题!');
+        await request.close();
+        await explicit.close();
+        await empty.close();
+        await same.close();
+    });
+});

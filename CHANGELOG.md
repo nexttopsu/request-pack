@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.3.0
+
+新增单线程任务调度器 `TaskScheduler` / `createTaskScheduler`，把 7 个解析组合器收敛到 `html2object` 函数对象上，并修复 `createFetcher` 的 `with()` 派生缺陷。**无破坏性变更**：既有模块的公开签名与行为、`exports`、tsup 单入口、4 个 dist 文件名、依赖、`engines` 一律不变，新模块零依赖。
+
+> 版本由已发布的 `1.2.0` 直接跳到 `1.3.0`：本批改动含新增 API，原计划的补丁版 `1.2.1` 不再单独发布，其 `with()` 修复一并并入本版。
+
+- **单线程**：不创建 `worker_threads`，在当前事件循环里用 Promise 池控制 `concurrency`；与 `TaskPool`（子线程跑 CPU 密集任务）互补，适合一组受控并发的 I/O 任务
+- **结果按输入下标排序**：`results` 长度恒等于任务列表长度，每项 `{ ok, status, value, result, error?, item, index }`，`result` 是 `value` 的别名；`errors` 为 `{ error, item, index, reason, cause? }`，两者都是只读快照
+- **链式 API**：`start()` / `done(cb)` / `stop()` / `restart()` 全部返回实例本身，另有 `results` / `errors` / `status` getter 与 `wait(): Promise<{ results, errors }>`
+- **失败不中断整批**：同步 throw 与 rejected Promise 都记为 `failed`；`stop()` 只停止派发、在途 Promise 照常跑完并结算，未派发项记为 `cancelled`；`restart()` 只重跑 `failed` + `cancelled`，成功结果保留，在途未结算时先等待再开新一轮
+- **日志显式化**：不传 / `false` 静默，`true` 才绑定 `console`，也可传自定义 `SchedulerLogger`；不读环境变量
+- **组合器收敛到 `html2object`**：7 个组合器（`text / html / attr / json / loop / object / nullable`）用 `Object.assign` 挂到 `html2object` 函数对象上，可写 `html2object.text(...)`；**与命名导出是同一个函数引用，不是第二套构造器**，根入口原有命名导出全部保留，零破坏。解析行为与 `ParsedResult<S>` 推导不变；README 主示例改用新写法。`test/parser.test.ts` 补 4 个用例（引用同一性、两种写法结果一致、静态推导、约束选项），smoke 补 7 个方法的运行时断言。
+- `src/index.ts` 新增一行 re-export；新类型统一用 `Scheduler*` 前缀，避免与 `pool.ts` 的 `TaskError` / `TaskOutcome` 冲突
+- `test/scheduler.test.ts` 新增 18 个用例（顺序、并发上限、失败、stop 在途、restart 边界、链式、快照、配置校验、日志与异常兜底），已加入 `scripts.test` / `scripts.test:coverage` 的显式文件列表；`test/smoke/compat.mjs` 补 Node 18 可跑的全链路与 CJS 导出断言。新模块行覆盖率 100%
+- **修复 `createFetcher.with()` 派生缺陷**：`with({ schema })` 换字段时原本会继承按旧结果形状写的 `parser` 加工函数，旧函数访问新结果里不存在的字段会抛 `TRANSFORM_FAILED`，README 里「创建时配 `parser`、再 `with({ schema })`」的示例写法会直接失败。现在只要传了新 `schema` 且未显式提供 `parser`，派生实例就不带加工链；显式传 `parser`（含 `[]`）以传入为准，不换 schema 的 `with({ timeoutMs })` 等行为不变。`Fetcher.with` 泛型重载的 JSDoc 与 README 写清该语义，`test/fetcher.test.ts` 新增 2 个回归测试。
+- 版本 `1.2.0 → 1.3.0`，`package.json` 与 `package-lock.json`（顶部 + `packages[""]`）同步；`exports`、单入口、4 个 dist 文件名、依赖、`engines`、`cheerio ~1.0.0` 锁均不变。
+
 ## 1.2.0
 
 新增向后兼容的高层管线 `createFetcher`，把「请求 → HTML 结构化解析 → 输出校验 → 结果加工 → 复验」串成一次调用。**无破坏性变更**：既有 `createHttp` / `TaskPool` / `html2object` / `utils` 的公开签名与行为一律不变，`exports`、单入口与 4 个 dist 文件名不变，engines 仍是 `>=18.17`。

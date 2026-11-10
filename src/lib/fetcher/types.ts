@@ -151,7 +151,10 @@ export interface Fetcher<S extends Schema> {
     raw(url: string, overrides?: RequestOverrides): Promise<string>;
     /** 释放连接池与浏览器；幂等 */
     close(): Promise<void>;
-    /** 换 schema 派生新实例，重新走完整校验与编译 */
+    /**
+     * 换 schema 派生新实例，重新走完整校验与编译。
+     * 结果形状变了，旧的 parser 加工链不会被继承；需要加工请显式传 parser（含空数组）。
+     */
     with<S2 extends Schema>(overrides: { readonly schema: S2 } & Omit<FetcherWithOverrides<S2>, 'schema'>): Fetcher<S2>;
     with(overrides: FetcherWithOverrides<S>): Fetcher<S>;
     /** 编译后的输出 schema，创建时缓存，全实例复用 */

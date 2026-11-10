@@ -9,13 +9,14 @@ npm install request-pack
 ```
 
 ```ts
-import { createHttp, TaskPool, defineThreadTask, html2object, createFetcher, text, attr, loop } from 'request-pack';
+import { createHttp, TaskPool, defineThreadTask, createTaskScheduler, html2object, createFetcher, text, attr, loop } from 'request-pack';
 ```
 
 ## 目录
 
 - [HTTP 客户端 `createHttp`](#http-客户端-createhttp)
 - [并发任务池 `TaskPool`](#并发任务池-taskpool)
+- [单线程任务调度器 `TaskScheduler`](#单线程任务调度器-taskscheduler)
 - [HTML 解析 `html2object`](#html-解析-html2object)
 - [高层管线 `createFetcher`](#高层管线-createfetcher)
 - [工具函数 `utils`](#工具函数-utils)
@@ -187,20 +188,88 @@ const { results, errors, items } = await pool
 
 ---
 
+## 单线程任务调度器 `TaskScheduler`
+
+在**当前事件循环**里用 Promise 控制并发，不创建 `worker_threads`。适合一组受控并发的 I/O 任务（例如配合 `createHttp` 抓一批 URL）：不需要 worker 文件，也不引入任何新依赖。
+
+| | `TaskPool` | `TaskScheduler` |
+|---|---|---|
+| 执行位置 | `worker_threads` 子线程 | 当前主线程 |
+| 适用场景 | CPU 密集、需要线程隔离 | I/O 密集、handler 返回 Promise |
+| 处理器 | worker 文件里 `defineThreadTask` 注册 | 构造时直接传 `handler(item, index)` |
+| 控制方式 | `run()` 返回 Promise | `start()` + `done()`，可随时 `stop()` / `restart()` |
+
+### 调用方式
+
+```ts
+import { createTaskScheduler } from 'request-pack';
+
+const 任务 = createTaskScheduler(urls, {
+    concurrency: 3,          // 任务并发数，默认 3；设为 1 即严格串行
+    logging: true,           // 是否开启日志；也可传 { info?, warn?, error? } 自定义
+    handler: async (item, index) => http.getText(item),
+});
+
+任务.start().done((results, errors) => {
+    for (const r of results) {
+        console.log(r.result, r.item, r.index);   // result 是 value 的别名
+    }
+    console.log(errors);
+});
+
+任务.stop();      // 停止派发新任务，在途任务照常跑完
+任务.restart();   // 只重跑 errors 里的任务
+任务.errors;      // [{ error, item, index, reason, cause? }]
+```
+
+`start / done / stop / restart` 都返回实例本身，可任意链式调用；`wait(): Promise<{ results, errors }>` 便于 `await`。也可用 `new TaskScheduler(items, options)`。
+
+### 结果形状
+
+`results` 长度恒等于任务列表长度，**按输入下标排序**（与完成顺序无关），每项：
+
+```ts
+{
+    ok: boolean;                 // 仅 status === 'success' 时为 true
+    status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled';
+    value: R | undefined;        // 处理函数返回值
+    result: R | undefined;       // value 的别名
+    error?: string;              // 失败信息
+    item: T;                     // 原始任务数据
+    index: number;               // 原始下标
+}
+```
+
+`errors` 是失败项数组，同样按输入下标排序，每项 `{ error, item, index, reason: 'task' | 'cancelled', cause? }`。`results` / `errors` 都是快照，改动它们不会影响调度器内部状态。
+
+### 行为约定
+
+- **单个任务失败不中断整批**：handler 抛错或 Promise reject 都记为 `failed`，错误信息进 `errors`，其余任务照常跑完；同步抛错也能兜住。
+- **`stop()` 不撤销在途 Promise**：只停止派发新任务；未派发的项记为 `cancelled` 并进 `errors`，已派发的照常跑完结算，之后本轮结束并触发一次 `done`。
+- **`restart()` 只重跑错误项**（`failed` + `cancelled`），成功结果原样保留；若在途任务还没结算，会先停止派发、等在途跑完再开新一轮，避免旧结果覆盖新结果。新一轮结束再次触发 `done`。
+- **`done()` 每轮结束触发一次**：注册在已完成的实例上也会异步拿到当前快照；支持 `async` 回调，回调自身抛错只记日志、不影响调度。
+- **`start()` 只派发 `pending` 项**：运行中重复调用是幂等的；已完成且没有 pending 项时再调用不产生空轮次、不重复触发 `done`（新注册的 `done()` / `wait()` 仍会拿到当前快照）。已失败 / 已取消的任务要用 `restart()` 重跑。
+- **日志显式化**：不传或 `false` 完全静默，`true` 才绑定 `console`，传对象则使用自定义 logger；不读环境变量。
+- **单线程的边界**：调度器不隔离 CPU 开销，handler 里的同步计算仍会阻塞事件循环；CPU 密集场景请用 `TaskPool`。
+
+---
+
 ## HTML 解析 `html2object`
 
 用 schema 组合器代替字符串 DSL，复制粘贴选择器时不会写错括号，结果类型可被 TypeScript 推导。
 
+**7 个组合器都挂在 `html2object` 上**：只 import 一个名字就能写完整 schema，不必在 import 里罗列一堆函数。它们与命名导出是**同一个函数引用**，`import { text, loop, ... }` 的旧写法继续可用、行为完全一致。
+
 ```ts
-import { html2object, text, html, attr, loop } from 'request-pack';
+import { html2object } from 'request-pack';
 
 const data = html2object(page, {
-    title: text('title'),
-    content: html('article .body'),
-    author: text('.meta .name'),
-    tags: loop('.tag-list li', {          // 列表 → 对象数组
-        name: text('span'),
-        href: attr('href', 'a'),
+    title: html2object.text('title'),
+    content: html2object.html('article .body'),
+    author: html2object.text('.meta .name'),
+    tags: html2object.loop('.tag-list li', {   // 列表 → 对象数组
+        name: html2object.text('span'),
+        href: html2object.attr('href', 'a'),
     }),
 });
 // => {
@@ -212,6 +281,8 @@ const data = html2object(page, {
 ```
 
 ### 组合器
+
+下表用简写；`text(...)` 与 `html2object.text(...)` 等价，7 个方法（`text / html / attr / json / loop / object / nullable`）都有两种访问方式。
 
 | 组合器 | 结果 | 说明 |
 |---|---|---|
@@ -230,6 +301,7 @@ const data = html2object(page, {
 - `required?` / `min?` / `max?` / `pattern?` / `minItems?` / `maxItems?` 是**输出约束**：`html2object` 自身仍是 best-effort，不会据此报错；它们由 `createFetcher` 编译成输出校验规则（见下节）。这些可选字段不改变组合器的返回类型，`ParsedResult<S>` 推导与旧版完全一致。
 
 ```ts
+// 命名导入写法（与 html2object.xxx 等价，旧代码不用改）
 const data = html2object(page, {
     title: text('title'),
     price: nullable(text('.price')),                  // 没有这个节点 → null
@@ -332,6 +404,8 @@ const detail = request.with({ schema: { heading: text('h1') } });
 const plain = request.with({ timeoutMs: 5_000 });   // 不换 schema → Fetcher<原 S>
 ```
 
+> **换 schema 时旧的 `parser` 加工链不会被继承**：加工函数依赖旧结果的字段形状，继续沿用会访问不存在的字段而报错。需要加工请显式传 `parser`（如 `with({ schema, parser: [] })` 明确不带加工）。不换 schema 的 `with({ timeoutMs })` 照常继承全部配置。
+
 ### `Fetcher<S>` 成员
 
 | 成员 | 行为 |
@@ -341,7 +415,7 @@ const plain = request.with({ timeoutMs: 5_000 });   // 不换 schema → Fetcher
 | `request.raw(url, overrides?)` | 原始 HTML 字符串，跳过解析 / 校验 / 加工 |
 | `request.close()` | 释放连接池与浏览器，幂等；关闭后调用抛 `code:'CLOSED'` |
 | `request[Symbol.asyncDispose]` | 仅在运行时存在该 Symbol 时挂上 `close` |
-| `request.with(overrides)` | 派生新实例，可换 schema（泛型重载保证静态类型跟着变） |
+| `request.with(overrides)` | 派生新实例，可换 schema（泛型重载保证静态类型跟着变；换 schema 时默认不继承旧 `parser`） |
 | `request.outputSchema` | 暴露编译后的 zod schema，供测试与复用 |
 
 ### `FetcherError`

@@ -13,8 +13,10 @@ import { fileURLToPath } from 'node:url';
 import {
     createHttp,
     createFetcher,
+    createTaskScheduler,
     html2object,
     text,
+    html,
     attr,
     loop,
     nullable,
@@ -76,6 +78,28 @@ const FIXTURE = `<!doctype html><html><head><title>页面</title></head><body>
 <script type="application/ld+json">{"name":"商品","price":9.9}</script>
 </body></html>`;
 
+/* 组合器挂在 html2object 上：与命名导出同一引用，且可直接构造 schema */
+const combinators = { text, html, attr, json, loop, object, nullable };
+for (const [name, fn] of Object.entries(combinators)) {
+    assert.equal(html2object[name], fn, `html2object.${name} 应与命名导出是同一个函数`);
+}
+const viaNamespace = html2object(FIXTURE, {
+    title: html2object.text('h1.title'),
+    inner: html2object.html('h1.title'),
+    cover: html2object.attr('data-x', 'h1.title'),
+    ld: html2object.json('script[type="application/ld+json"]'),
+    tags: html2object.loop('ul.tags li', html2object.text('')),
+    card: html2object.object('.card', { name: html2object.text('h2') }),
+    missing: html2object.nullable(html2object.text('.nope')),
+});
+assert.equal(viaNamespace.title, '主标题');
+assert.equal(viaNamespace.inner, '主标题');
+assert.equal(viaNamespace.cover, '');
+assert.equal(viaNamespace.ld.price, 9.9);
+assert.deepEqual(viaNamespace.tags, ['前端', '解析']);
+assert.deepEqual(viaNamespace.card, { name: '卡片' });
+assert.equal(viaNamespace.missing, null);
+
 const server = createServer((_req, res) => {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     res.end(FIXTURE);
@@ -110,11 +134,42 @@ assert.equal(safe.meta.transport, 'axios');
 assert.equal(safe.meta.status, 200);
 await request.close();
 
+/* 单线程调度器：结果按输入顺序、失败进 errors、restart 只重跑错误项（只用 Node 18 API） */
+const calls = new Map();
+let round = 1;
+const job = createTaskScheduler([1, 2, 3], {
+    concurrency: 2,
+    logging: false,
+    handler: async (item, index) => {
+        calls.set(index, (calls.get(index) ?? 0) + 1);
+        await Promise.resolve();
+        if (round === 1 && index === 1) throw new Error('boom');
+        return item * 2;
+    },
+});
+let seen;
+job.start().done((results, errors) => {
+    seen = { results, errors };
+});
+const first = await job.wait();
+assert.deepEqual(first.results.map(r => r.index), [0, 1, 2]);
+assert.deepEqual(first.errors.map(e => e.index), [1]);
+assert.equal(first.errors[0].reason, 'task');
+
+round = 2;
+const second = await job.restart().wait();
+assert.deepEqual(second.errors, []);
+assert.deepEqual(second.results.map(r => r.value), [2, 4, 6]);
+assert.equal(calls.get(0), 1, '成功项不应被重跑');
+assert.equal(calls.get(1), 2, '失败项应重跑一次');
+assert.ok(seen && seen.results.length === 3, 'done 回调应收到完整结果数组');
+
 /* CJS 产物：未安装 playwright 时 require('request-pack') 也不能报错（懒加载不被降级成 require） */
 const require = createRequire(import.meta.url);
 const cjs = require('request-pack');
 assert.equal(typeof cjs.createFetcher, 'function');
 assert.equal(typeof cjs.createHttp, 'function');
+assert.equal(typeof cjs.createTaskScheduler, 'function');
 assert.equal(typeof cjs.html2object, 'function');
 
 server.closeAllConnections?.();

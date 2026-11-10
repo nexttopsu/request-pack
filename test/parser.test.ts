@@ -136,3 +136,82 @@ describe('html2object · 定位与取值', () => {
         );
     });
 });
+
+/* 组合器挂在 html2object 上，与命名导出的函数并存 */
+describe('html2object 上挂载的 7 个组合器', () => {
+    type IsEqual<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
+    type Assert<T extends true> = T;
+
+    it('全部可访问，且与命名导出是同一个函数引用', () => {
+        assert.equal(html2object.text, text);
+        assert.equal(html2object.html, html);
+        assert.equal(html2object.attr, attr);
+        assert.equal(html2object.json, json);
+        assert.equal(html2object.loop, loop);
+        assert.equal(html2object.object, object);
+        assert.equal(html2object.nullable, nullable);
+        assert.equal(typeof html2object, 'function');
+    });
+
+    it('用挂载方法构造的 schema 与命名导出写法解析结果完全一致', () => {
+        const doc = `${htmlStr}<script type="application/ld+json">{"name":"商品"}</script>`;
+        const viaNamespace = html2object(doc, {
+            title: html2object.text('title'),
+            heading: html2object.html('h1.todo'),
+            firstHref: html2object.attr('data-href', 'li', { first: true }),
+            ld: html2object.json('script'),
+            items: html2object.loop('#list li', {
+                label: html2object.text('span'),
+                href: html2object.attr('data-href'),
+            }),
+            card: html2object.object('body', { h1: html2object.text('h1') }),
+            whole: html2object.object({ body: html2object.text('h1') }),
+            missing: html2object.nullable(html2object.text('.nope')),
+        });
+        const viaNamed = html2object(doc, {
+            title: text('title'),
+            heading: html('h1.todo'),
+            firstHref: attr('data-href', 'li', { first: true }),
+            ld: json('script'),
+            items: loop('#list li', { label: text('span'), href: attr('data-href') }),
+            card: object('body', { h1: text('h1') }),
+            whole: object({ body: text('h1') }),
+            missing: nullable(text('.nope')),
+        });
+
+        assert.deepEqual(viaNamespace, viaNamed);
+        assert.equal(viaNamespace.title, '标题');
+        assert.equal(viaNamespace.heading, '<span>Todo</span>');
+        assert.equal(viaNamespace.firstHref, '/1');
+        assert.equal(viaNamespace.ld.name, '商品');
+        assert.deepEqual(viaNamespace.items.map(i => i.href), ['/1', '/2', '/3']);
+        assert.equal(viaNamespace.missing, null);
+    });
+
+    it('ParsedResult 静态推导与既有写法一致', () => {
+        const data = html2object('<p>x</p>', {
+            title: html2object.text('h1'),
+            price: html2object.nullable(html2object.text('.p')),
+            tags: html2object.loop('li', html2object.text('')),
+            card: html2object.object({ name: html2object.text('h2') }),
+        });
+        type _推导不变 = Assert<IsEqual<
+            typeof data,
+            { title: string; price: string | null; tags: string[]; card: { name: string } }
+        >>;
+        assert.equal(data.title, '');
+        assert.equal(data.price, null);
+        assert.deepEqual(data.tags, []);
+    });
+
+    it('约束选项通过挂载写法传入时同样生效', () => {
+        const field = html2object.nullable(html2object.text('.p', { required: true, min: 2 }));
+        assert.equal(field.required, true);
+        assert.equal(field.min, 2);
+        assert.equal(field.nullable, true);
+        const loopField = html2object.loop('li', html2object.text(''), { minItems: 1 });
+        assert.equal(loopField.minItems, 1);
+        // html2object 仍是 best-effort，不因约束报错；匹配到空节点返回 ''，列表未匹配返回 []
+        assert.deepEqual(html2object('<p class="p"></p>', { a: field, b: loopField }), { a: '', b: [] });
+    });
+});

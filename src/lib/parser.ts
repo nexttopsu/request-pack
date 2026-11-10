@@ -249,25 +249,7 @@ function applySchema<S extends Schema>($: CheerioAPI, root: any, schema: S, path
 /* 入口                                                                 */
 /* ------------------------------------------------------------------ */
 
-/**
- * 将 HTML 按 schema 解析为结构化对象，结果类型可自动推导。
- *
- * @example
- * const schema = {
- *     title: text('title'),
- *     h1:    html('h1.todo'),
- *     price: nullable(text('.price')),                       // 未匹配 → null
- *     first: text('li', { first: true }),                    // 只取第一个
- *     card:  object('.card', { name: text('h2') }),          // 子树内取多个字段
- *     ld:    json('script[type="application/ld+json"]'),     // JSON-LD
- *     list:  loop('#list li', {
- *         href: attr('data-href'),
- *         name: text('span'),
- *     }),
- * };
- * const data = html2object(html, schema);
- */
-export function html2object<S extends Schema>(
+function parseHtml<S extends Schema>(
     htmlStr: string,
     schema: S,
     removeSelector?: string[]
@@ -280,3 +262,27 @@ export function html2object<S extends Schema>(
 
     return applySchema($, $.root(), schema, '');
 }
+
+/**
+ * 将 HTML 按 schema 解析为结构化对象，结果类型可自动推导。
+ *
+ * 7 个组合器同时挂在这个函数对象上：可以写 `html2object.text(...)`，不必在 import 里
+ * 罗列一堆名字。它们与命名导出是**同一个函数引用**，不是第二套构造器；
+ * 原有的 `import { text, loop, ... }` 写法继续可用，两者完全等价。
+ *
+ * @example
+ * const data = html2object(page, {
+ *     title: html2object.text('title'),
+ *     price: html2object.nullable(html2object.text('.price')),
+ *     tags:  html2object.loop('.tag', html2object.text('')),
+ * });
+ */
+export const html2object = Object.assign(parseHtml, {
+    text,
+    html,
+    attr,
+    json,
+    loop,
+    object,
+    nullable,
+});
